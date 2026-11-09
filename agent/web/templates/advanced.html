@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if busy %}<meta http-equiv="refresh" content="10">{% endif %}
+<title>İçerik Paneli</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --mute:#6b7280; --line:#e5e7eb;
+          --ok:#15803d; --bad:#b91c1c; --warn:#b45309; --accent:#2563eb; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { position:sticky; top:0; z-index:5; background:var(--ink); color:#fff; padding:10px 20px;
+           display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+  header b { font-size:17px; margin-right:auto; }
+  header a { color:#cbd5e1; text-decoration:none; font-size:14px; }
+  header a:hover { color:#fff; }
+  main { max-width:1200px; margin:0 auto; padding:20px 16px 60px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-bottom:20px; }
+  h2 { margin:0 0 12px; font-size:18px; }
+  h3 { margin:0 0 6px; font-size:16px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mute); font-weight:600; font-size:13px; }
+  input, textarea, select { font:inherit; padding:7px 9px; border:1px solid #cbd5e1; border-radius:8px; }
+  textarea { width:100%; min-height:70px; }
+  button { font:inherit; padding:7px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }
+  button.ok { background:var(--ok); } button.bad { background:var(--bad); } button.ghost { background:#e5e7eb; color:var(--ink); }
+  button.small { padding:3px 9px; font-size:13px; }
+  form.inline { display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap; margin:0; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .muted { color:var(--mute); font-size:13px; }
+  .flash { background:#ecfdf5; border:1px solid #a7f3d0; padding:10px 14px; border-radius:10px; margin-bottom:16px; }
+  .review { display:grid; grid-template-columns: 300px 1fr; gap:20px; padding:14px 0; border-top:1px solid var(--line); }
+  .review:first-of-type { border-top:0; }
+  video { width:300px; border-radius:10px; background:#000; aspect-ratio:9/16; }
+  ol.scenes { padding-left:20px; margin:8px 0; } ol.scenes li { margin-bottom:4px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; background:#eef2ff; color:#3730a3; }
+  .s-boş, .s-ok, .s-published, .s-bitti { color:var(--ok); font-weight:600; }
+  .s-alınmış, .s-failed, .s-hata, .s-geçersiz, .s-publish_failed { color:var(--bad); font-weight:600; }
+  .s-belirsiz, .s-çalışıyor, .s-sırada, .s-producing, .s-review { color:var(--warn); font-weight:600; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width: 800px) { .review, .grid2 { grid-template-columns:1fr; } video { width:100%; max-width:320px; } }
+</style>
+</head>
+<body>
+<header>
+  <a href="/" style="color:#fff">← Ana akış</a> <b>{{ brand_name or "İçerik Paneli" }}{% if brand_handle %} <span class="muted">@{{ brand_handle }}</span>{% endif %}</b>
+  <a href="#onay">Onay ({{ review|length }})</a>
+  <a href="#takvim">Takvim</a>
+  <a href="#yayin">Yayınlar</a>
+  <a href="#istatistik">İstatistik</a>
+  <a href="#konular">Konular</a>
+  <a href="#marka">Marka</a>
+  <form class="inline" method="post" action="/daily"><button class="small">Günlük döngüyü çalıştır</button></form>
+</header>
+<main>
+{% with messages = get_flashed_messages() %}{% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}{% endwith %}
+
+{% if jobs %}
+<section>
+  <h2>İşler {% if busy %}<span class="muted">(sayfa 10 sn'de bir yenilenir)</span>{% endif %}</h2>
+  <table>
+    <tr><th>#</th><th>İş</th><th>Durum</th><th>Başlangıç</th><th>Bitiş</th><th>Sonuç</th></tr>
+    {% for j in jobs[:8] %}
+    <tr><td>{{ j.id }}</td><td>{{ j.name }}</td><td class="s-{{ j.status }}">{{ j.status }}</td>
+        <td>{{ j.started }}</td><td>{{ j.finished }}</td><td class="muted">{{ j.result }}</td></tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
+<section id="onay">
+  <h2>Onay bekleyen videolar</h2>
+  {% for v in review %}{% set s = v.script|script %}{% set m = v.meta|meta %}
+  <div class="review">
+    <video src="/media/{{ v.id }}" controls preload="metadata"></video>
+    <div>
+      <span class="pill">{{ v.topic }}</span> <span class="muted">sürüm {{ v.version }}</span>
+      <h3>{{ s.title }}</h3>
+      {% if m.revision_summary %}<p class="muted">Son düzeltme: {{ m.revision_summary }}</p>{% endif %}
+      <p>{{ s.description }}<br><span class="muted">{% for t in s.hashtags %}#{{ t }} {% endfor %}</span></p>
+      <ol class="scenes">{% for sc in s.scenes %}<li>{{ sc.narration }}</li>{% endfor %}</ol>
+      <p class="muted">Ses: {{ m.voice or "female" }}, hız: {{ m.rate or "normal" }}</p>
+      <div class="row">
+        <form class="inline" method="post" action="/videos/{{ v.id }}/approve">
+          <button class="ok">Beğendim, yayınla</button>
+        </form>
+      </div>
+      <form method="post" action="/videos/{{ v.id }}/revise" style="margin-top:12px">
+        <textarea name="feedback" placeholder="Beğenmedim: ne değişsin? (ör. 'giriş çok sıkıcı', '3. görsel olmamış', 'erkek sesi olsun ve biraz yavaş')"></textarea>
+        <button class="bad">Beğenmedim, düzelt</button>
+      </form>
+    </div>
+  </div>
+  {% else %}<p class="muted">Onay bekleyen video yok.</p>{% endfor %}
+</section>
+
+<section id="takvim">
+  <h2>İçerik takvimi</h2>
+  <form class="inline" method="post" action="/plan">
+    <input type="number" name="count" min="1" max="30" value="{{ config.PLAN_AHEAD_DAYS }}" style="width:80px">
+    <button>Yeni alt başlık planla</button>
+  </form>
+  <table style="margin-top:10px">
+    <tr><th>Tarih</th><th>Ana konu</th><th>Alt başlık</th><th>Durum</th><th></th></tr>
+    {% for s in calendar %}
+    <tr>
+      <td>{{ s.planned_for }}{% if s.planned_for == today %} <span class="pill">bugün</span>{% endif %}</td>
+      <td>{{ s.topic }}</td>
+      <td>{{ s.title }}<br><span class="muted">{{ s.angle }}</span>{% if s.error %}<br><span class="s-failed">{{ s.error[:200] }}</span>{% endif %}</td>
+      <td class="s-{{ s.status }}">{{ s.status }}</td>
+      <td>{% if s.status in ("planned", "failed") %}
+        <form class="inline" method="post" action="/subtopics/{{ s.id }}/produce"><button class="small">Şimdi üret</button></form>
+        <form class="inline" method="post" action="/subtopics/{{ s.id }}/delete"><button class="small ghost">Sil</button></form>
+      {% endif %}</td>
+    </tr>
+    {% else %}<tr><td colspan="5" class="muted">Takvim boş. Önce konu ekle, sonra planla.</td></tr>{% endfor %}
+  </table>
+</section>
+
+<section id="yayin">
+  <h2>Yayınlar <span class="muted">({{ config.PLATFORMS|join(", ") }})</span></h2>
+  {% for f in failed_videos %}
+  <form class="inline" method="post" action="/videos/{{ f.id }}/publish" style="margin-bottom:8px">
+    <span class="s-failed">Yayın eksik kaldı:</span> {{ f.title }} <button class="small">Başarısız platformları tekrar dene</button>
+  </form><br>
+  {% endfor %}
+  <table>
+    <tr><th>Video</th><th>Platform</th><th>Durum</th><th>Bağlantı</th><th>Son izlenme</th><th>Elle istatistik gir</th></tr>
+    {% for p in posts %}
+    <tr>
+      <td>{{ p.sub_title }}</td><td>{{ p.platform }}</td>
+      <td class="s-{{ p.status }}" title="{{ p.log[-600:] }}">{{ p.status }}</td>
+      <td>{% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener">aç</a>{% endif %}</td>
+      <td>{{ p.views if p.views is not none else "-" }}</td>
+      <td>{% if p.status == "ok" %}
+        <form class="inline" method="post" action="/stats/manual">
+          <input type="hidden" name="post_id" value="{{ p.id }}">
+          <input name="views" placeholder="izlenme" style="width:80px">
+          <input name="likes" placeholder="beğeni" style="width:70px">
+          <input name="comments" placeholder="yorum" style="width:70px">
+          <button class="small ghost">Kaydet</button>
+        </form>{% endif %}</td>
+    </tr>
+    {% else %}<tr><td colspan="6" class="muted">Henüz yayın yok.</td></tr>{% endfor %}
+  </table>
+</section>
+
+<section id="istatistik">
+  <h2>İstatistikler</h2>
+  <form class="inline" method="post" action="/stats/collect"><button class="small">YouTube istatistiklerini şimdi çek</button></form>
+  <div class="grid2" style="margin-top:12px">
+    <div>
+      <h3>Ana konulara göre</h3>
+      <table><tr><th>Konu</th><th>Video</th><th>Ort. izlenme</th></tr>
+      {% for t in topic_perf %}<tr><td>{{ t.topic }}</td><td>{{ t.videos }}</td><td>{{ t.avg_views }}</td></tr>
+      {% else %}<tr><td colspan="3" class="muted">Veri yok.</td></tr>{% endfor %}</table>
+    </div>
+    <div>
+      <h3>Videolar (tüm platformların toplamı)</h3>
+      <table><tr><th>Video</th><th>İzlenme</th><th>Beğeni</th><th>Yorum</th></tr>
+      {% for r in performance %}<tr><td>{{ r.title }}<br><span class="muted">{% for k, val in r.platforms.items() %}{{ k }}: {{ val }} {% endfor %}</span></td>
+        <td>{{ r.views }}</td><td>{{ r.likes }}</td><td>{{ r.comments }}</td></tr>
+      {% else %}<tr><td colspan="4" class="muted">Veri yok.</td></tr>{% endfor %}</table>
+    </div>
+  </div>
+  <p class="muted">Bu özet her planlamada Konu Planlama Ajanı'na gönderilir; iyi giden konulara ağırlık verilir.</p>
+</section>
+
+<section id="konular">
+  <h2>Ana konular</h2>
+  <form class="inline" method="post" action="/topics">
+    <input name="title" placeholder="Ana konu (ör. Uzay)" required>
+    <input name="notes" placeholder="Not (isteğe bağlı: hedef kitle, ton...)" style="min-width:280px">
+    <button>Ekle</button>
+  </form>
+  <table style="margin-top:10px">
+    {% for t in topics %}
+    <tr><td>{{ t.title }}</td><td class="muted">{{ t.notes }}</td>
+      <td>{{ "aktif" if t.active else "durduruldu" }}</td>
+      <td><form class="inline" method="post" action="/topics/{{ t.id }}/toggle"><button class="small ghost">{{ "Durdur" if t.active else "Aktifleştir" }}</button></form></td></tr>
+    {% else %}<tr><td class="muted">Henüz konu yok.</td></tr>{% endfor %}
+  </table>
+</section>
+
+<section id="marka">
+  <h2>İsim / marka kontrolü</h2>
+  <form class="inline" method="post" action="/brand">
+    <input name="name" placeholder="İstediğin isim (ör. bilgikutusu)" required>
+    <button>Platformlarda kontrol et</button>
+  </form>
+  {% if brand_table %}
+  <p class="muted">"{{ brand_desired }}" için sonuçlar. "belirsiz": TikTok bot doğrulaması, Instagram hız sınırı uyguluyor; "bak" bağlantısıyla elle kontrol et.</p>
+  <table>
+    <tr><th>Kullanıcı adı</th>{% for p in brand_platforms %}<th>{{ p }}</th>{% endfor %}<th></th></tr>
+    {% for handle, res in brand_table.items() %}
+    <tr><td><b>{{ handle }}</b></td>
+      {% for p in brand_platforms %}<td class="s-{{ res.get(p, '') }}">{{ res.get(p, "-") }}
+        {% if res.get(p) in ("belirsiz", "alınmış") %}<a class="muted" href="{{ profile_urls[p].format(handle) }}" target="_blank" rel="noopener">bak</a>{% endif %}</td>{% endfor %}
+      <td><form class="inline" method="post" action="/brand/choose">
+        <input type="hidden" name="handle" value="{{ handle }}">
+        <input name="display_name" placeholder="Görünen ad" style="width:140px">
+        <button class="small">Bunu seç</button></form></td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+</main>
+</body>
+</html>

@@ -1,0 +1,8 @@
+*.sh text eol=lf
+packaging/linux/video-studyosu text eol=lf
+packaging/linux/deb-launcher text eol=lf
+.env.example text eol=lf
+downloads/** binary
+*.jpeg binary
+*.jpg binary
+*.png binary

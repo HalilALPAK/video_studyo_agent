@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Menüdeki Video Stüdyosu simgesinin çalıştırdığı komut (/usr/bin/video-studyosu).
+# İlk açılışta (ve paket güncellenince) uygulamayı kullanıcının klasörüne hazırlar, sonra paneli açar.
+set -u
+SRC="${VIDEO_STUDYOSU_SRC:-/opt/video-studyosu}"
+export VIDEO_STUDYOSU_HOME="${VIDEO_STUDYOSU_HOME:-$HOME/.local/share/video-studyosu}"
+APP="$VIDEO_STUDYOSU_HOME"
+STAMP="$APP/.kurulu-surum"
+
+have_dialog() { command -v zenity >/dev/null && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; }
+
+notice() {  # notice info|error "metin"
+  if have_dialog; then zenity "--$1" --width=460 --title="Video Stüdyosu" --text="$2" 2>/dev/null
+  else echo "$2" >&2; fi
+}
+
+setup() {
+  tar xzf "$SRC/app.tar.gz" -C "$APP" && bash "$APP/packaging/linux/install.sh" --from-deb --no-start
+}
+
+if [ "$(cat "$STAMP" 2>/dev/null)" != "$(cat "$SRC/VERSION")" ]; then
+  mkdir -p "$APP/data"
+  LOG="$APP/data/kurulum.log"
+  RC="$(mktemp)"
+  if have_dialog; then
+    ( setup >"$LOG" 2>&1; echo $? >"$RC" ) | zenity --progress --pulsate --auto-close --no-cancel --width=460 \
+      --title="Video Stüdyosu" --text="İlk açılış hazırlanıyor. İnternet hızına göre birkaç dakika sürebilir…" 2>/dev/null
+  else
+    setup >"$LOG" 2>&1; echo $? >"$RC"
+  fi
+  status="$(cat "$RC")"; rm -f "$RC"
+  if [ "$status" != 0 ]; then
+    notice error "Hazırlık tamamlanamadı. İnternet bağlantını kontrol edip tekrar aç.\n\nAyrıntı: $LOG"
+    exit 1
+  fi
+  cp "$SRC/VERSION" "$STAMP"
+
+  message=""
+  command -v google-chrome-stable >/dev/null || command -v google-chrome >/dev/null || command -v chromium >/dev/null \
+    || command -v chromium-browser >/dev/null || message="• Google Chrome kur (hesap bağlama ve yükleme için gerekli).\n"
+  command -v claude >/dev/null || [ -x "$HOME/.local/bin/claude" ] || compgen -G "$HOME/.vscode/extensions/anthropic.claude-code-*" >/dev/null \
+    || grep -q '^ANTHROPIC_API_KEY=.' "$APP/.env" \
+    || message="$message• Claude Code kurup giriş yap ya da $APP/.env dosyasına ANTHROPIC_API_KEY ekle (senaryolar için gerekli).\n"
+  [ -z "$message" ] || notice info "Video Stüdyosu hazır. Başlamadan önce:\n\n$message"
+fi
+
+exec "$APP/packaging/linux/video-studyosu" "$@"

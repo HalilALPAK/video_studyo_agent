@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Paneli arka planda başlatır ve tarayıcıda açar.  Kullanım: video-studyosu [stop|status]
+set -u
+APP_HOME="${VIDEO_STUDYOSU_HOME:-$HOME/.local/share/video-studyosu}"
+cd "$APP_HOME" || exit 1
+
+PORT="${PANEL_PORT:-$(sed -n 's/^PANEL_PORT=\([0-9]*\).*/\1/p' .env 2>/dev/null | head -1)}"
+PORT="${PORT:-5050}"
+URL="http://127.0.0.1:$PORT"
+PID_FILE=data/panel.pid
+LOG_FILE=data/panel.log
+
+listening() { (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; }
+
+panel_pid() {  # dosyadaki süreç gerçekten bizim panelimizse pid'ini yazar
+  [ -f "$PID_FILE" ] || return 1
+  local pid; pid="$(cat "$PID_FILE")"
+  grep -qa "agent" "/proc/$pid/cmdline" 2>/dev/null && echo "$pid"
+}
+
+case "${1:-start}" in
+  stop)
+    if pid="$(panel_pid)"; then kill "$pid" && rm -f "$PID_FILE" && echo "Panel durduruldu."; else echo "Panel çalışmıyor."; fi
+    exit 0 ;;
+  status)
+    if listening; then echo "Panel açık: $URL"; else echo "Panel kapalı."; fi
+    exit 0 ;;
+  start) ;;
+  *) echo "Kullanım: video-studyosu [stop|status]" >&2; exit 2 ;;
+esac
+
+if ! listening; then
+  mkdir -p data
+  nohup setsid .venv/bin/python -m agent panel >>"$LOG_FILE" 2>&1 &
+  echo $! > "$PID_FILE"
+  for _ in $(seq 1 40); do listening && break; sleep 0.5; done
+  listening || { echo "Panel açılamadı, kayıt: $APP_HOME/$LOG_FILE" >&2; exit 1; }
+fi
+
+echo "Panel açık: $URL"
+command -v xdg-open >/dev/null && xdg-open "$URL" >/dev/null 2>&1 &
+exit 0

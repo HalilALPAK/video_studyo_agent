@@ -1,0 +1,11 @@
+anthropic
+openai
+edge-tts
+flask
+pillow
+imageio-ffmpeg
+mutagen
+requests
+python-dotenv
+pydantic
+google-genai>=2.34
