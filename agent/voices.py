@@ -57,6 +57,11 @@ def current_voice() -> str:
     return v if v in VOICES else DEFAULT_VOICE
 
 
+def use_cuma() -> bool:
+    """Konudan üretilen videolarda Cuma Robot köşede anlatıcı olsun mu."""
+    return db.get_setting("use_cuma", "1") == "1"
+
+
 def current_quality() -> str:
     q = db.get_setting("quality", DEFAULT_QUALITY)
     return q if q in QUALITIES else DEFAULT_QUALITY

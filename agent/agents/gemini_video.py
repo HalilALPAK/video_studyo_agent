@@ -1,7 +1,7 @@
 """Video Üretim Ajanı: videonun tamamını Gemini Omni Flash üretir.
 
-Her sahne (uzunsa birkaç parça) tek klip olarak istenir: sahne görüntüsü, köşede konuşan Cuma Robot
-ve Türkçe ses birlikte gelir. Burada sadece klipler birleştirilip altyazı eklenir. Klipler ücretli
+Her sahne (uzunsa birkaç parça) tek klip olarak istenir: sahne görüntüsü, seçildiyse köşede konuşan
+Cuma Robot ve ses birlikte gelir. Burada sadece klipler birleştirilip altyazı eklenir. Klipler ücretli
 olduğu için metni ve görseli değişmeyen klip asla yeniden üretilmez: yarım kalan üretimde
 aynı klasörden, düzeltmede önceki sürümden alınır.
 """
@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import imageio_ffmpeg
+from PIL import Image
 
 from .. import omni
 from . import producer
@@ -40,6 +41,8 @@ def produce(
     force_scenes: set[int] = frozenset(),
     on_progress=lambda text: None,
     usage_ref: int | None = None,
+    narrator: bool = True,
+    cartoon: bool = True,
 ) -> Path:
     """Videoyu üretir, MP4 yolunu döndürür. force_scenes (1 tabanlı) önceki sürümden alınmaz."""
     omni.require_key()
@@ -54,7 +57,7 @@ def produce(
     clips, report = [], []
     for done, (i, k, part, visual) in enumerate(jobs, start=1):
         clip = workdir / f"clip_{i}_{k}.mp4"
-        key = _key(part, visual)
+        key = _key(part, f"{visual}|{narrator}|{cartoon}")
         clips.append((clip, part))
         if manifest.get(clip.name) == key and clip.exists():
             continue  # yarım kalan önceki denemeden, parası ödenmiş
@@ -63,7 +66,7 @@ def produce(
         else:
             on_progress(f"Gemini sahneyi üretiyor ({done}/{len(jobs)})")
             log.info("Sahne %d parça %d üretiliyor", i, k)
-            omni.scene_clip(part, visual, clip, usage_ref)
+            omni.scene_clip(part, visual, clip, usage_ref, narrator=narrator, cartoon=cartoon)
             report.append(f"gemini {i}.{k}")
         manifest[clip.name] = key
         (workdir / MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
@@ -76,6 +79,11 @@ def produce(
     for n, (clip, part) in enumerate(clips):
         length = omni.duration(clip)
         chunks = producer._caption_chunks(part)
+        if not chunks:  # seslendirmesiz klip: altyazı yok, boş katman süreyi korur
+            png = captions_dir / f"{n:03d}_blank.png"
+            Image.new("RGBA", (W, H), (0, 0, 0, 0)).save(png)
+            caption_lines.append(f"file '{png.as_posix()}'\nduration {length:.3f}")
+            continue
         total_chars = sum(len(c) for c in chunks)
         for j, chunk in enumerate(chunks):
             png = captions_dir / f"{n:03d}_{j:02d}.png"
@@ -94,7 +102,7 @@ def produce(
         "-filter_complex",
         f"[0:v]scale={W}:{H},fps={FPS},format=yuv420p[bg];[1:v]fps={FPS},format=rgba[cap];"
         "[bg][cap]overlay=0:0:eof_action=pass,format=yuv420p[v]",
-        "-map", "[v]", "-map", "0:a",
+        "-map", "[v]", "-map", "0:a?",
         "-c:v", "libx264", "-preset", "medium", "-crf", "20",
         "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2",
         "-movflags", "+faststart", str(out),

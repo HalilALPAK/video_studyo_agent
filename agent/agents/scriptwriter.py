@@ -44,7 +44,7 @@ def word_count(script: Script) -> int:
     return sum(len(s.narration.split()) for s in script.scenes)
 
 
-def system_prompt() -> str:
+def system_prompt(narrator: bool = True) -> str:
     length = voices.current_length()
     min_words, max_words = length["words"]
     min_scenes = 3 if max_words <= 60 else 4
@@ -53,7 +53,7 @@ def system_prompt() -> str:
         min_words=min_words, max_words=max_words, seconds=length["max_seconds"],
         min_scenes=min_scenes, max_scenes=min_scenes + 2,
     )
-    if config.NARRATOR_NAME:
+    if narrator and config.NARRATOR_NAME:
         name = config.NARRATOR_NAME
         system += (
             f"\n\nAnlatıcı: Videoyu {name} anlatıyor; meraklı, neşeli, çocuk ruhlu sevimli bir robot, "
@@ -65,7 +65,25 @@ def system_prompt() -> str:
     return system
 
 
-def write(subtopic_id: int) -> Script:
+PROMPT_SYSTEM = """Kullanıcı yapay zekâ ile üretilecek kısa dikey bir video istiyor. İsteğini video planına çevir.
+
+- En fazla {max_scenes} sahne yaz; istek tek çekimlikse tek sahne yeterli. Her sahne yaklaşık 10 saniyelik tek çekim.
+- visual İngilizce: kullanıcının istediği konu, karakter, stil, ortam ve hareketi eksiksiz koruyarak o sahnede \
+ne görüneceğini betimle. Kullanıcı stil belirtmediyse uygun bir görsel stil seç. Görüntüde yazı olmasın.
+- narration: Kullanıcı seslendirme, anlatım veya konuşma istemediyse boş metin bırak. İstediyse istediği dilde, \
+sahne başına en fazla 25 kelime yaz.
+- title en fazla 90 karakter, description 1-2 cümle, hashtags 3-8 adet (başında # olmadan); Türkçe, isteğe uygun.
+- Kullanıcının istemediği karakter, marka veya anlatıcı ekleme."""
+
+
+def write_from_prompt(user_prompt: str) -> Script:
+    """Kullanıcının serbest isteğini sahnelere böler (anlatıcı karakter yok)."""
+    max_scenes = max(1, round(voices.current_length()["max_seconds"] / 10))
+    return llm.structured(system=PROMPT_SYSTEM.format(max_scenes=max_scenes),
+                          prompt=f"Kullanıcının isteği:\n{user_prompt}", schema=Script, effort="high")
+
+
+def write(subtopic_id: int, narrator: bool = True) -> Script:
     sub = db.one(
         "SELECT s.title, s.angle, t.title topic, t.notes FROM subtopics s "
         "JOIN topics t ON t.id = s.topic_id WHERE s.id = ?",
@@ -73,7 +91,7 @@ def write(subtopic_id: int) -> Script:
     )
     if sub is None:
         raise ValueError(f"Alt başlık bulunamadı: {subtopic_id}")
-    system = system_prompt()
+    system = system_prompt(narrator)
     prompt = (
         f"Ana konu: {sub['topic']}" + (f" ({sub['notes']})" if sub["notes"] else "") + "\n"
         f"Alt başlık: {sub['title']}\nAçı/kanca: {sub['angle']}\n\nBu video için senaryoyu yaz."

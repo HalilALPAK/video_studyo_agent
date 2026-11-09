@@ -5,8 +5,8 @@
 <h1 align="center">Video Stüdyosu</h1>
 
 <p align="center">
-  Konunu yaz, <b>Cuma Robot</b> anlatsın. Türkçe kısa dikey videolar üretir,<br>
-  onayından sonra YouTube, TikTok ve Instagram'a yükler.
+  Konunu yaz <b>Cuma Robot</b> anlatsın ya da istediğin videoyu kendi cümlelerinle iste.<br>
+  Kısa dikey videolar üretir, onayından sonra YouTube, TikTok ve Instagram'a yükler.
 </p>
 
 ---
@@ -30,7 +30,7 @@
 | Gereken | Ne için |
 |---|---|
 | **Gemini API anahtarı** | Videoları üretir. [AI Studio](https://aistudio.google.com/apikey)'dan alınır, hesapta faturalandırma açık olmalı. |
-| **Claude Code girişi** veya `ANTHROPIC_API_KEY` | Konuları planlar, senaryoları yazar. |
+| **Claude Code girişi** veya `ANTHROPIC_API_KEY` | Konuları planlar, senaryoları yazar, promptunu sahnelere böler. |
 | **Google Chrome** | Sosyal medya hesaplarını bağlar ve videoları yükler. |
 
 ## Nasıl çalışır
@@ -40,7 +40,16 @@
 3. **Videolar:** Her video hazır olunca izle. Beğendiysen onayla, beğenmediysen ne değişsin yaz; sadece ilgili sahneler yeniden üretilir.
 4. **Yayın:** Hesaplarını bir kez bağla, onayladığın videoları tek tuşla yükle.
 
-Her sahneyi Gemini tek klip olarak üretir: sahne görüntüsü, köşede konuşan Cuma Robot ve Türkçe ses birlikte gelir. Altyazıyı uygulama ekler.
+Her sahneyi Gemini tek klip olarak üretir, sahne görüntüsü ve ses birlikte gelir. Seslendirmeli videolarda altyazıyı uygulama ekler.
+
+### İki üretim yolu
+
+| | Konudan video | Prompt ile video |
+|---|---|---|
+| **Ne yazarsın** | Kanal adı ve konular | İstediğin videonun tarifi |
+| **Senaryo** | Claude konuyu alt başlıklara böler, senaryoyu yazar | Claude tarifini sahnelere böler |
+| **Anlatıcı** | Seçenek: köşede konuşan Cuma Robot ya da görünmeyen ses | Yok; seslendirme ancak tarifte istersen olur |
+| **Stil** | Kanalın çizgi film stili | Tarifte ne yazdıysan |
 
 ## Maliyet
 
@@ -61,7 +70,7 @@ Her şey kendi bilgisayarında kalır:
 - Windows: `%LOCALAPPDATA%\VideoStudyosu`
 - Linux: `~/.local/share/video-studyosu`
 
-API anahtarın, bağlı hesapların ve videoların indirme paketlerinde bulunmaz; güncelleme yaptığında korunur. Video üretimi için metinler ve `cuma.jpeg` Google'a, senaryo istekleri Anthropic'e gönderilir.
+API anahtarın, bağlı hesapların ve videoların indirme paketlerinde bulunmaz; güncelleme yaptığında korunur. Video üretimi için metinler ve (Cuma anlatıcı açıksa) `cuma.jpeg` Google'a, senaryo istekleri Anthropic'e gönderilir.
 
 ## Bilinen sınırlar
 

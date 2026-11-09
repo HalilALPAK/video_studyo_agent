@@ -123,11 +123,13 @@
       {% if key_hint %}<label class="row" style="margin:0; gap:6px; font-weight:500"><input type="checkbox" name="forget_key" value="1" style="width:auto; margin:0"> Anahtarı sil</label>{% endif %}
     </div>
     <p class="muted" style="margin:6px 0 0">Anahtar kaydedilirken doğrulanır ve sadece bu bilgisayarda saklanır.
-      Videonun tamamını (sahneler, köşede konuşan Cuma ve ses) Gemini üretir. Hata olursa "Tekrar dene"de
+      Videonun tamamını (sahneler ve ses) Gemini üretir. Hata olursa "Tekrar dene"de
       hazır klipler yeniden ücretlendirilmez.</p>
     <p style="margin:6px 0 0"><b>API kullanımı (bu ay):</b> {{ api_usage.videos }} video, {{ "%.0f"|format(api_usage.seconds) }} sn,
       ≈ <b>{{ "%.2f"|format(api_usage.cost) }} $</b> <span class="muted">· toplam ≈ {{ "%.2f"|format(api_usage.total_cost) }} $ (tahmini; kesin tutar Google faturasında)</span></p>
   </div>
+  <label class="row" style="gap:8px; font-weight:500; margin-top:14px"><input type="checkbox" name="use_cuma" value="1" style="width:auto; margin:0" {{ "checked" if use_cuma }}>
+    <span>🤖 <b>Cuma Robot köşede anlatıcı olsun</b> <small>(kapalıysa ekranda karakter olmaz, görünmeyen bir ses anlatır)</small></span></label>
   <label>Video süresi</label>
   <div class="lengths">
     {% for key, l in lengths.items() %}
@@ -177,7 +179,7 @@
       <span class="muted">Kanal adı:</span> <span class="chip">{{ brand.display or brand.desired }}</span>
       <span class="muted">Konular:</span> {% for t in topics %}<span class="chip">{{ t.title }}</span>{% endfor %}
       <span class="muted">Süre:</span> <span class="chip">{{ lengths[current_length].label }}</span>
-      <span class="muted">Üretim:</span> <span class="chip">Gemini API</span>
+      <span class="muted">Anlatıcı:</span> <span class="chip">{{ "Cuma Robot" if use_cuma else "Yok" }}</span>
     </div>
     <details class="box" id="duzenle">
       <summary style="margin:0">✏️ Değiştir (kanal adı, konular, süre, ses)</summary>
@@ -186,6 +188,20 @@
   {% else %}
     {{ setup_form(False) }}
   {% endif %}
+  <div class="box" id="prompt" style="margin-top:16px">
+    <b>✨ Ya da istediğin videoyu yaz</b>
+    <p class="muted" style="margin:4px 0 0">Kanal veya konu gerekmez, Cuma Robot olmaz. Stilini, sahnesini sen anlat; seslendirme istiyorsan onu da yaz.</p>
+    <form method="post" action="/prompt">
+      <textarea name="prompt" required placeholder="ör. Yağmurlu bir İstanbul sokağında yürüyen kedi, sinematik, gece ışıkları"></textarea>
+      <div class="row" style="margin-top:8px">
+        <select name="length" style="width:auto; margin:0">
+          {% for key, l in lengths.items() %}<option value="{{ key }}" {{ "selected" if key == current_length }}>{{ l.label }} · en fazla ≈ {{ "%.1f"|format(l.max_seconds * price_per_second) }} $</option>{% endfor %}
+        </select>
+        <button>Videoyu üret</button>
+        {% if not key_hint %}<span class="muted">Önce yukarıdan Gemini API anahtarını girmelisin.</span>{% endif %}
+      </div>
+    </form>
+  </div>
 </section>
 
 {# ---------------------------------------------------------------- 2. İSİM #}
@@ -294,7 +310,7 @@
       {% if m.revision_summary %}<p class="note">Yapılan düzeltme: {{ m.revision_summary }}</p>{% endif %}
       <p style="margin:4px 0">{{ sc.description }}<br><span class="muted">{% for t in sc.hashtags %}#{{ t }} {% endfor %}</span></p>
       <p class="muted" style="margin:4px 0">
-        {% if m.engine == "omni" %}Gemini API · bu videonun maliyeti ≈ {{ "%.2f"|format(v.id|api_cost) }} ${% else %}Eski yerel yöntemle üretildi{% endif %}</p>
+        {% if m.engine == "omni" %}{{ "Cuma Robot anlatıyor" if m.narrator else "Anlatıcısız" }} · Gemini API · bu videonun maliyeti ≈ {{ "%.2f"|format(v.id|api_cost) }} ${% else %}Eski yerel yöntemle üretildi{% endif %}</p>
       <details><summary>Seslendirme metnini göster</summary>
         <ol class="scenes">{% for x in sc.scenes %}<li>{{ x.narration }}</li>{% endfor %}</ol></details>
       <div class="row" style="margin:14px 0 0">

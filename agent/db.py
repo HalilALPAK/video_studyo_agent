@@ -102,6 +102,7 @@ def connect():
 
 MIGRATIONS = [
     "ALTER TABLE subtopics ADD COLUMN progress TEXT DEFAULT ''",
+    "ALTER TABLE subtopics ADD COLUMN mode TEXT DEFAULT 'topic'",  # topic | prompt
 ]
 
 

@@ -27,30 +27,35 @@ def ensure_plan() -> list[dict]:
 
 def produce_subtopic(subtopic_id: int) -> int:
     """Senaryo yazar, videoyu üretir ve onaya gönderir. Video id'sini döndürür (kaldırıldıysa 0)."""
-    row = db.one("SELECT status FROM subtopics WHERE id = ?", (subtopic_id,))
+    row = db.one("SELECT status, mode, angle FROM subtopics WHERE id = ?", (subtopic_id,))
     if row is None or row["status"] == "deleted":
         return 0  # sırada beklerken panelden kaldırıldı ya da konusu değişti
     omni.require_key()
     db.execute("UPDATE subtopics SET status = 'producing', error = '' WHERE id = ?", (subtopic_id,))
     progress = lambda text: db.set_progress(subtopic_id, text)  # noqa: E731
     workdir = config.VIDEO_DIR / str(subtopic_id) / "v1"
-    meta = {"engine": "omni"}
-    # Yarım kalan denemenin senaryosu korunur: aynı metinle üretilen ücretli klipler tekrar ödenmez
-    failed = db.one("SELECT id, script FROM videos WHERE subtopic_id = ? AND status = 'failed' AND version = 1 "
+    from_prompt = row["mode"] == "prompt"
+    # Yarım kalan denemenin senaryosu ve ayarları korunur: aynı metinle üretilen ücretli klipler tekrar ödenmez
+    failed = db.one("SELECT id, script, meta FROM videos WHERE subtopic_id = ? AND status = 'failed' AND version = 1 "
                     "ORDER BY id DESC", (subtopic_id,))
     try:
         if failed and failed["script"]:
             script = scriptwriter.Script.model_validate_json(failed["script"])
             video_id = failed["id"]
+            old = json.loads(failed["meta"] or "{}")
+            meta = {"engine": "omni", "narrator": old.get("narrator", True), "cartoon": old.get("cartoon", True)}
             db.execute("UPDATE videos SET status = 'producing' WHERE id = ?", (video_id,))
         else:
+            meta = {"engine": "omni", "narrator": not from_prompt and voices.use_cuma(), "cartoon": not from_prompt}
             progress("Senaryo yazılıyor")
-            script = scriptwriter.write(subtopic_id)
+            script = (scriptwriter.write_from_prompt(row["angle"]) if from_prompt
+                      else scriptwriter.write(subtopic_id, narrator=meta["narrator"]))
             video_id = db.execute(
                 "INSERT INTO videos(subtopic_id, version, script, meta, workdir) VALUES(?, 1, ?, ?, ?)",
                 (subtopic_id, script.model_dump_json(), json.dumps(meta), str(workdir)),
             )
-        path = gemini_video.produce(script, workdir, on_progress=progress, usage_ref=video_id)
+        path = gemini_video.produce(script, workdir, on_progress=progress, usage_ref=video_id,
+                                    narrator=meta["narrator"], cartoon=meta["cartoon"])
     except Exception as e:
         log.exception("Alt başlık %s üretilemedi", subtopic_id)
         db.execute("UPDATE subtopics SET status = 'failed', error = ?, progress = '' WHERE id = ?", (str(e), subtopic_id))
@@ -60,6 +65,21 @@ def produce_subtopic(subtopic_id: int) -> int:
                (str(path), json.dumps(meta, ensure_ascii=False), video_id))
     db.execute("UPDATE subtopics SET status = 'review', progress = '' WHERE id = ?", (subtopic_id,))
     return video_id
+
+
+PROMPT_TOPIC = "Prompt videoları"  # pasif konu: planlayıcı bundan alt başlık üretmez
+
+
+def add_prompt_video(text: str) -> int:
+    """Serbest metinle istenen videoyu kuyruğa ekler, alt başlık id'sini döndürür."""
+    db.execute("INSERT OR IGNORE INTO topics(title, active) VALUES(?, 0)", (PROMPT_TOPIC,))
+    topic = db.one("SELECT id FROM topics WHERE title = ?", (PROMPT_TOPIC,))
+    title = text if len(text) <= 90 else text[:87].rstrip() + "..."
+    return db.execute(
+        "INSERT INTO subtopics(topic_id, title, angle, planned_for, status, progress, mode) "
+        "VALUES(?, ?, ?, ?, 'planned', 'Sırada', 'prompt')",
+        (topic["id"], title, text, dt.date.today().isoformat()),
+    )
 
 
 def kickoff(count: int) -> str:

@@ -129,11 +129,12 @@ def index():
     accounts = publisher.accounts()
     started = bool(brand_state["desired"] and topics)
     waiting_publish = any(v["status"] != "published" for v in ready)
+    has_videos = bool(in_progress or review or failed or ready or jobs.busy("main"))  # prompt videosu kanal kurmadan da olur
     # Her adım: "done" (tamam), "active" (şimdi senin/sistemin sırası) veya "waiting" (henüz değil)
     step = {
         1: "done" if started else "active",
         2: "waiting" if not started else "done" if brand_state["chosen"] else "active",
-        3: "waiting" if not started else "active" if (in_progress or review or failed or not ready) else "done",
+        3: "waiting" if not (started or has_videos) else "active" if (in_progress or review or failed or not ready) else "done",
         4: "waiting" if not ready else "active" if waiting_publish else "done",
     }
 
@@ -160,6 +161,7 @@ def index():
         lengths=voices.LENGTHS,
         current_length=db.get_setting("video_length", voices.DEFAULT_LENGTH),
         price_per_second=omni.TOKENS_PER_SECOND * omni.PRICE_OUTPUT,
+        use_cuma=voices.use_cuma(),
         key_hint=(k := omni.api_key()) and f"…{k[-4:]}",
         api_usage=omni.usage_summary(),
         signature=_signature(),
@@ -170,6 +172,7 @@ def _save_settings(form) -> str | None:
     """Süre ve Gemini anahtarını kaydeder. Sorun varsa kullanıcıya gösterilecek mesajı döndürür."""
     if form.get("length") in voices.LENGTHS:
         db.set_setting("video_length", form["length"])
+    db.set_setting("use_cuma", "1" if form.get("use_cuma") else "0")  # kutu her iki formda da var
     if form.get("forget_key"):
         db.set_setting("gemini_api_key", "")
     key = form.get("gemini_api_key", "").strip()
@@ -210,7 +213,7 @@ def _set_topics(titles: list[str]) -> list[str]:
     for title in wanted.values():
         db.execute("INSERT INTO topics(title) VALUES(?)", (title,))
     db.execute("UPDATE subtopics SET status = 'deleted', progress = '' WHERE status = 'planned' "
-               "AND topic_id IN (SELECT id FROM topics WHERE active = 0)")
+               "AND mode = 'topic' AND topic_id IN (SELECT id FROM topics WHERE active = 0)")
     return removed
 
 
@@ -330,6 +333,23 @@ def remove_subtopic(subtopic_id: int):
     return _back(request.form.get("anchor", "adim3"))
 
 
+@app.post("/prompt")
+def prompt_video():
+    text = request.form.get("prompt", "").strip()
+    if not text:
+        flash("Nasıl bir video istediğini yazmalısın.")
+        return _back("prompt")
+    if request.form.get("length") in voices.LENGTHS:
+        db.set_setting("video_length", request.form["length"])
+    if not omni.api_key():
+        flash("Önce Gemini API anahtarını gir.")
+        return _back("prompt")
+    subtopic_id = orchestrator.add_prompt_video(text)
+    jobs.submit("Prompt videosu", orchestrator.produce_subtopic, subtopic_id, lane="main")
+    flash("Videon hazırlanıyor; hazır olunca 3. adımda görünecek.")
+    return _back("adim3")
+
+
 @app.post("/more")
 def more():
     if not omni.api_key():
@@ -430,7 +450,7 @@ def advanced():
         calendar=calendar,
         posts=posts,
         failed_videos=failed_videos,
-        topics=db.query("SELECT * FROM topics ORDER BY id"),
+        topics=db.query("SELECT * FROM topics WHERE title != ? ORDER BY id", (orchestrator.PROMPT_TOPIC,)),
         performance=analyst.performance_rows(),
         topic_perf=analyst.topic_rows(),
         brand_table=brand_table,

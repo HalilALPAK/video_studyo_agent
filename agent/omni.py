@@ -28,6 +28,7 @@ PRICE_OUTPUT = 12.00 / 1_000_000
 TOKENS_PER_SECOND = 5792
 MAX_WORDS_PER_CLIP = 28  # klip en fazla 15 sn; Türkçe ~2,3 kelime/sn
 WORDS_PER_SECOND = 2.3
+SILENT_CLIP_SECONDS = 10  # seslendirmesiz sahne (Omni'nin varsayılanı)
 
 FACE_IMAGE = config.ROOT / "assets" / "narrator" / "cuma_face.png"
 REFERENCE_IMAGE = config.ROOT / "cuma.jpeg"  # kullanıcının verdiği karakter paftası; her klipte gönderilir
@@ -53,6 +54,18 @@ In that bubble the narrator says in Turkish, clearly and enthusiastically, with 
 Bright, friendly young robot voice, the same voice in every clip. The narrator finishes speaking just \
 before the clip ends. The only sound is this speech: no background music, no sound effects. \
 Single continuous shot, no scene cuts, no subtitles, no on-screen text."""
+
+
+NO_TEXT = "Single continuous shot, no scene cuts, no subtitles, no on-screen text."
+VOICEOVER_PROMPT = """Vertical video.{style}
+Scene: {visual}
+No narrator or presenter is visible. An off-screen voice says in Turkish, clearly and enthusiastically:
+"{text}"
+The voice finishes speaking just before the clip ends. The only sound is this speech: no background music, \
+no sound effects. """ + NO_TEXT
+SILENT_PROMPT = """Vertical video.{style}
+Scene: {visual}
+No dialogue or voice-over; natural ambient sound only. """ + NO_TEXT
 
 
 class OmniError(RuntimeError):
@@ -166,22 +179,30 @@ def _save(interaction, out: Path, ref: int | None) -> float:
 
 def clip_seconds(text: str) -> int:
     """Metnin rahatça söyleneceği klip süresi; Omni 3-15 tam saniye kabul ediyor."""
+    if not text.strip():
+        return SILENT_CLIP_SECONDS
     return max(3, min(15, math.ceil(len(text.split()) / WORDS_PER_SECOND) + 1))
 
 
-def scene_clip(text: str, visual: str, out: Path, ref: int | None = None) -> float:
-    """Sahneyi, köşede `text`i söyleyen Cuma ile birlikte tek klip üretir; süresini (sn) döndürür."""
-    if not REFERENCE_IMAGE.exists():
-        raise OmniError(f"Cuma Robot referans görseli bulunamadı: {REFERENCE_IMAGE}")
-    image = base64.b64encode(REFERENCE_IMAGE.read_bytes()).decode()
-    prompt = SCENE_PROMPT.format(style=config.IMAGE_STYLE, visual=visual, text=text.replace('"', "'"))
+def scene_clip(text: str, visual: str, out: Path, ref: int | None = None,
+               narrator: bool = True, cartoon: bool = True) -> float:
+    """Sahneyi tek klip üretir, süresini (sn) döndürür. narrator: köşede `text`i söyleyen Cuma (cuma.jpeg
+    referansıyla); değilse ekranda anlatıcı olmaz, `text` boşsa konuşma da olmaz. cartoon: kanalın çizgi film stili."""
+    clean = text.replace('"', "'")
+    style = f" Style: {config.IMAGE_STYLE}." if cartoon else ""
+    if narrator:
+        if not REFERENCE_IMAGE.exists():
+            raise OmniError(f"Cuma Robot referans görseli bulunamadı: {REFERENCE_IMAGE}")
+        image = base64.b64encode(REFERENCE_IMAGE.read_bytes()).decode()
+        request = [{"type": "image", "data": image, "mime_type": "image/jpeg"},
+                   {"type": "text", "text": SCENE_PROMPT.format(style=config.IMAGE_STYLE, visual=visual, text=clean)}]
+    else:
+        template = VOICEOVER_PROMPT if text.strip() else SILENT_PROMPT
+        request = template.format(style=style, visual=visual, text=clean)
     try:
         interaction = _client().interactions.create(
             model=MODEL,
-            input=[
-                {"type": "image", "data": image, "mime_type": "image/jpeg"},
-                {"type": "text", "text": prompt},
-            ],
+            input=request,
             response_format={"type": "video", "aspect_ratio": "9:16", "resolution": "720p",
                              "duration": f"{clip_seconds(text)}s"},
             timeout=900,

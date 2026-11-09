@@ -31,6 +31,7 @@ harfine aynı bırak; değişen her alan o sahnenin yeniden üretilmesine yol a�
 visual'i değiştirmeden sahne numarasını regenerate_images'a ekle. Her yeniden üretim ücretlidir; \
 sadece gereken sahneleri ekle.
 - Video ve ses Gemini tarafından birlikte üretilir, ses seçilemez: voice ve rate alanlarını "same" bırak.
+- Bir sahnenin narration alanı boşsa, kullanıcı istemedikçe boş kalsın.
 - Toplam seslendirme en fazla {max_words} kelime olmalı (video {seconds} saniyeyi geçmemeli).
 - summary: neyi değiştirdiğini 1-2 cümleyle Türkçe yaz."""
 
@@ -72,7 +73,8 @@ def revise(video_id: int, feedback: str) -> int:
         effort="medium",
     )
 
-    new_meta = {"revision_summary": rev.summary, "feedback": feedback, "engine": "omni"}
+    new_meta = {"revision_summary": rev.summary, "feedback": feedback, "engine": "omni",
+                "narrator": meta.get("narrator", True), "cartoon": meta.get("cartoon", True)}
 
     db.execute("UPDATE videos SET status = 'rejected', feedback = ? WHERE id = ?", (feedback, video_id))
     version = v["version"] + 1
@@ -90,6 +92,8 @@ def revise(video_id: int, feedback: str) -> int:
             force_scenes=set(rev.regenerate_images),
             on_progress=progress,
             usage_ref=new_id,
+            narrator=new_meta["narrator"],
+            cartoon=new_meta["cartoon"],
         )
     except Exception as e:
         db.execute("UPDATE videos SET status = 'failed' WHERE id = ?", (new_id,))
