@@ -6,7 +6,8 @@
 
 <p align="center">
   Konunu yaz <b>Cuma Robot</b> anlatsın ya da istediğin videoyu kendi cümlelerinle iste.<br>
-  Kısa dikey videolar üretir, onayından sonra YouTube, TikTok ve Instagram'a yükler.
+  Kısa dikey videoları ücretsiz yerel olarak ya da Gemini ile üretir, onayından sonra<br>
+  YouTube, TikTok ve Instagram'a yükler.
 </p>
 
 ---
@@ -29,31 +30,41 @@
 
 | Gereken | Ne için |
 |---|---|
-| **Gemini API anahtarı** | Videoları üretir. [AI Studio](https://aistudio.google.com/apikey)'dan alınır, hesapta faturalandırma açık olmalı. |
-| **Claude Code girişi** veya `ANTHROPIC_API_KEY` | Konuları planlar, senaryoları yazar, promptunu sahnelere böler. |
-| **Google Chrome** | Sosyal medya hesaplarını bağlar ve videoları yükler. |
+| **Claude Code girişi** veya `ANTHROPIC_API_KEY` | Konuları planlar, senaryoları yazar, tarifini sahnelere böler; yerel üretimde sahneleri de çizer. |
+| **Google Chrome** | Sosyal medya hesaplarını bağlar, videoları yükler, yerel üretimde çizimleri görüntüye çevirir. |
+| **Gemini API anahtarı** *(isteğe bağlı)* | Sadece "Gemini API" yöntemini seçersen. [AI Studio](https://aistudio.google.com/apikey)'dan alınır, hesapta faturalandırma açık olmalı. |
 
 ## Nasıl çalışır
 
-1. **Başla:** Kanal adını ve konularını yaz, Gemini API anahtarını gir.
+Panel dört adımdan oluşur:
+
+1. **Kanal:** Kanal adını ve video konularını kaydet. Sadece tarifle video yapacaksan atlayabilirsin.
 2. **İsim:** Kullanıcı adı YouTube, TikTok ve Instagram'da taranır; alınmışsa benzerleri önerilir.
-3. **Videolar:** Her video hazır olunca izle. Beğendiysen onayla, beğenmediysen ne değişsin yaz; sadece ilgili sahneler yeniden üretilir.
+3. **Video üret:** Tüm üretim burada, tek bir formdan yapılır. Hazır olan videoyu izle; beğendiysen onayla, beğenmediysen ne değişsin yaz, sadece ilgili kısım yeniden üretilir.
 4. **Yayın:** Hesaplarını bir kez bağla, onayladığın videoları tek tuşla yükle.
 
-Her sahneyi Gemini tek klip olarak üretir, sahne görüntüsü ve ses birlikte gelir. Seslendirmeli videolarda altyazıyı uygulama ekler.
+### Üretim formundaki seçimler
 
-### İki üretim yolu
+**Ne tür video?**
 
-| | Konudan video | Prompt ile video |
+| | Konularımdan | Kendi tarifimden |
 |---|---|---|
-| **Ne yazarsın** | Kanal adı ve konular | İstediğin videonun tarifi |
-| **Senaryo** | Claude konuyu alt başlıklara böler, senaryoyu yazar | Claude tarifini sahnelere böler |
+| **Ne yazarsın** | Hiçbir şey; 1. adımdaki konular kullanılır | İstediğin videonun tarifi |
+| **Senaryo** | Claude yeni bir alt başlık seçer, senaryoyu yazar | Claude tarifini sahnelere böler |
 | **Anlatıcı** | Seçenek: köşede konuşan Cuma Robot ya da görünmeyen ses | Yok; seslendirme ancak tarifte istersen olur |
-| **Stil** | Kanalın çizgi film stili | Tarifte ne yazdıysan |
 
-## Maliyet
+**Nasıl üretilsin?**
 
-Video başına tahmini Gemini ücreti (720p, yaklaşık 0,07 $/sn, Kasım 2026 fiyatları):
+| | Yerel · ücretsiz | Gemini API · yüksek kalite |
+|---|---|---|
+| **Görüntü** | Claude'un çizdiği çizgi film sahneleri | Gemini'nin ürettiği gerçek hareketli video |
+| **Ses** | Listeden seçtiğin Türkçe ses | Gemini'nin kendi sesi |
+| **Cuma Robot** | Köşede konuşan rozet | Köşede, sahneyle birlikte canlandırılır |
+| **Ücret** | Yok | Saniye başına (aşağıda) |
+
+## Gemini maliyeti
+
+Sadece Gemini yöntemi ücretlidir. Video başına tahmini ücret (720p, yaklaşık 0,07 $/sn, Kasım 2026 fiyatları):
 
 | Süre | Tahmini ücret |
 |---|---|
@@ -70,10 +81,11 @@ Her şey kendi bilgisayarında kalır:
 - Windows: `%LOCALAPPDATA%\VideoStudyosu`
 - Linux: `~/.local/share/video-studyosu`
 
-API anahtarın, bağlı hesapların ve videoların indirme paketlerinde bulunmaz; güncelleme yaptığında korunur. Video üretimi için metinler ve (Cuma anlatıcı açıksa) `cuma.jpeg` Google'a, senaryo istekleri Anthropic'e gönderilir.
+API anahtarın, bağlı hesapların ve videoların indirme paketlerinde bulunmaz; güncelleme yaptığında korunur. Senaryo ve çizim istekleri Anthropic'e, seslendirme metinleri (yerel yöntemde) Microsoft'un ücretsiz ses servisine, Gemini yönteminde metinler ve (Cuma açıksa) `cuma.jpeg` Google'a gönderilir.
 
 ## Bilinen sınırlar
 
+- Yerel yöntemde Cuma Robot'un ağzı ses yüksekliğine göre açılıp kapanan basit bir animasyondur; gerçekçi dudak senkronu Gemini yönteminde olur.
 - Google'a göre Gemini Omni'de İngilizce dışındaki diller değerlendirilmedi; Türkçe telaffuz ve klipler arası ses farklı çıkabilir.
 - Her videonun tamamı yapay zekâ ile üretilir ve Gemini çıktıları görünmez SynthID filigranı taşır. Platformların yapay zekâ içeriği etiketleme kurallarına uy.
 - Tarayıcıyla yükleme platformların kullanım şartlarına aykırı olabilir ve arayüzleri değişince bozulabilir.
@@ -88,7 +100,8 @@ agent/
   agents/brand.py          Kullanıcı adı taraması
   agents/planner.py        Alt başlık ve takvim
   agents/scriptwriter.py   Senaryo (Claude)
-  agents/gemini_video.py   Video üretimi (Gemini Omni Flash)
+  agents/producer.py       Yerel video üretimi (Claude çizimleri, seslendirme, altyazı)
+  agents/gemini_video.py   Gemini video üretimi (Gemini Omni Flash)
   agents/reviewer.py       Onay ve düzeltme
   agents/publisher.py      Yayın
   agents/analyst.py        İstatistik

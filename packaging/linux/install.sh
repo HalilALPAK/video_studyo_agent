@@ -106,7 +106,7 @@ if ! command -v claude >/dev/null && [ ! -x "$HOME/.local/bin/claude" ] && ! gre
   echo "  - Claude Code kur ve bir kez 'claude' yazıp giriş yap"
   echo "  - veya $APP_HOME/.env dosyasına ANTHROPIC_API_KEY=... ekle"
 fi
-echo "Panelde 1. adımdan Gemini API anahtarını girmen gerekecek (videoları Gemini üretir)."
+echo "Ücretsiz yerel üretim için ek ayar gerekmez; Gemini isteğe bağlıdır (panelde 3. adım)."
 echo "Açmak için uygulama menüsünden 'Video Stüdyosu'nu seç ya da: video-studyosu"
 [ "$START" = 1 ] && exec "$HOME/.local/bin/video-studyosu"
 exit 0

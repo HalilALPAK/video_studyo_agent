@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from .. import db, llm, voices
-from . import gemini_video
+from . import gemini_video, producer
 from .scriptwriter import Script
 
 
@@ -27,13 +27,22 @@ yazdı. Notu yorumla ve sadece gereken değişikliği yap:
 description, hashtags) değiştir. Dokunulmayan sahnelerin narration ve visual alanlarını harfi \
 harfine aynı bırak; değişen her alan o sahnenin yeniden üretilmesine yol açar.
 - Görselin içeriği değişecekse o sahnenin visual alanını yeniden yaz (İngilizce, görselde yazı yok).
-- Sahne aynı tarifle sadece yeniden üretilmeliyse (ör. "3. sahne çirkin", "robotun sesi bozuk") \
-visual'i değiştirmeden sahne numarasını regenerate_images'a ekle. Her yeniden üretim ücretlidir; \
-sadece gereken sahneleri ekle.
-- Video ve ses Gemini tarafından birlikte üretilir, ses seçilemez: voice ve rate alanlarını "same" bırak.
+{media_rules}
 - Bir sahnenin narration alanı boşsa, kullanıcı istemedikçe boş kalsın.
 - Toplam seslendirme en fazla {max_words} kelime olmalı (video {seconds} saniyeyi geçmemeli).
 - summary: neyi değiştirdiğini 1-2 cümleyle Türkçe yaz."""
+
+
+OMNI_RULES = """- Sahne aynı tarifle sadece yeniden üretilmeliyse (ör. "3. sahne çirkin", "robotun sesi bozuk") \
+visual'i değiştirmeden sahne numarasını regenerate_images'a ekle. Her yeniden üretim ücretlidir; \
+sadece gereken sahneleri ekle.
+- Video ve ses Gemini tarafından birlikte üretilir, ses seçilemez: voice ve rate alanlarını "same" bırak."""
+
+LOCAL_RULES = """- Görsel aynı tarifle sadece yeniden çizilmeliyse (ör. "3. görsel çirkin") visual'i değiştirmeden \
+sahne numarasını regenerate_images'a ekle.
+- Ses ile ilgiliyse (başka ses, erkek/kadın, hız) voice ve rate alanlarını ayarla; değişiklik yoksa \
+"same". voice için sadece şu kimlikler geçerli:
+{voices}"""
 
 
 def _video(video_id: int) -> dict:
@@ -56,25 +65,32 @@ def revise(video_id: int, feedback: str) -> int:
     progress("Notun yorumlanıyor, senaryo düzeltiliyor")
     old_script = Script.model_validate_json(v["script"])
     meta = json.loads(v["meta"] or "{}")
+    engine = meta.get("engine", "local")
+    old_voice = voices.resolve(meta.get("voice"))[0]
+    media_rules = OMNI_RULES if engine == "omni" else LOCAL_RULES.format(
+        voices="\n".join(f"  {key}: {info['label']} - {info['desc']}" for key, info in voices.VOICES.items()))
     scenes = "\n".join(
         f"Sahne {i}: narration={s.narration!r} | visual={s.visual!r}"
         for i, s in enumerate(old_script.scenes, start=1)
     )
     rev = llm.structured(
         system=SYSTEM.format(
-            max_words=voices.current_length()["words"][1], seconds=voices.current_length()["max_seconds"],
+            media_rules=media_rules, max_words=voices.current_length()["words"][1], seconds=voices.current_length()["max_seconds"],
         ),
         prompt=(
             f"Mevcut senaryo (JSON):\n{old_script.model_dump_json(indent=2)}\n\n"
             f"Sahne numaraları:\n{scenes}\n\n"
-            f"Kullanıcının notu: {feedback}"
+            + (f"Mevcut ses: {old_voice}, hız: {meta.get('rate', 'normal')}\n\n" if engine != "omni" else "")
+            + f"Kullanıcının notu: {feedback}"
         ),
         schema=Revision,
         effort="medium",
     )
 
-    new_meta = {"revision_summary": rev.summary, "feedback": feedback, "engine": "omni",
-                "narrator": meta.get("narrator", True), "cartoon": meta.get("cartoon", True)}
+    new_meta = {"revision_summary": rev.summary, "feedback": feedback, "engine": engine,
+                "narrator": meta.get("narrator", True), "cartoon": meta.get("cartoon", True),
+                "voice": rev.voice if rev.voice in voices.VOICES else old_voice,
+                "rate": meta.get("rate", "normal") if rev.rate == "same" else rev.rate}
 
     db.execute("UPDATE videos SET status = 'rejected', feedback = ? WHERE id = ?", (feedback, video_id))
     version = v["version"] + 1
@@ -85,16 +101,30 @@ def revise(video_id: int, feedback: str) -> int:
     )
     db.execute("UPDATE subtopics SET status = 'producing' WHERE id = ?", (v["subtopic_id"],))
     try:
-        path = gemini_video.produce(
-            rev.script,
-            workdir,
-            prev_dir=Path(v["workdir"]),
-            force_scenes=set(rev.regenerate_images),
-            on_progress=progress,
-            usage_ref=new_id,
-            narrator=new_meta["narrator"],
-            cartoon=new_meta["cartoon"],
-        )
+        if engine == "omni":
+            path = gemini_video.produce(
+                rev.script,
+                workdir,
+                prev_dir=Path(v["workdir"]),
+                force_scenes=set(rev.regenerate_images),
+                on_progress=progress,
+                usage_ref=new_id,
+                narrator=new_meta["narrator"],
+                cartoon=new_meta["cartoon"],
+            )
+        else:
+            path = producer.produce(
+                rev.script,
+                workdir,
+                voice=new_meta["voice"],
+                rate=new_meta["rate"],
+                prev=(old_script, Path(v["workdir"])),
+                force_images=set(rev.regenerate_images),
+                force_voice=(new_meta["voice"], new_meta["rate"]) != (old_voice, meta.get("rate", "normal")),
+                on_progress=progress,
+                max_seconds=voices.current_length()["max_seconds"],
+                with_narrator=new_meta["narrator"],
+            )
     except Exception as e:
         db.execute("UPDATE videos SET status = 'failed' WHERE id = ?", (new_id,))
         db.execute("UPDATE subtopics SET status = 'failed', error = ? WHERE id = ?", (str(e), v["subtopic_id"]))

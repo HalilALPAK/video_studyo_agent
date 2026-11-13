@@ -157,6 +157,14 @@ def voice_sample(voice_id: str) -> Path:
     return out
 
 
+SILENT_SCENE_SECONDS = 6
+
+
+def _silence(out: Path, seconds: float) -> None:
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "anullsrc=r=24000:cl=mono", "-t", str(seconds), "-b:a", "64k", str(out)], check=True)
+
+
 # --- Kare çizimi ---------------------------------------------------------------------
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
@@ -189,6 +197,8 @@ def _caption_chunks(text: str, max_words: int = 6) -> list[str]:
 def _caption_layer(size: tuple[int, int], caption: str) -> Image.Image:
     """Şeffaf zemin üzerine altyazı kutusu."""
     overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+    if not caption.strip():
+        return overlay
     draw = ImageDraw.Draw(overlay)
     font = _font(64)
     lines = textwrap.wrap(caption, 22)
@@ -228,6 +238,7 @@ def produce(
     max_seconds: int | None = None,
     engine: str = "local",
     usage_ref: int | None = None,
+    with_narrator: bool = True,
 ) -> Path:
     """Videoyu üretir ve MP4 yolunu döndürür. force_images 1 tabanlı sahne numaralarıdır.
     on_progress panelde gösterilecek kısa durum metinlerini alır. max_seconds verilirse
@@ -286,6 +297,9 @@ def produce(
     base_rate = preset["rate"] + voices.RATE_ADJUST.get(rate, 0)
 
     def speak(i: int, text: str, extra: int = 0) -> None:
+        if not text.strip():  # seslendirmesiz sahne (prompt videoları): sessizlik
+            _silence(workdir / f"scene_{i}.mp3", SILENT_SCENE_SECONDS)
+            return
         _tts(preset)(text, workdir / f"scene_{i}.mp3", preset, base_rate + extra)
 
     if engine == "local":
@@ -316,13 +330,14 @@ def produce(
     for i, scene in enumerate(script.scenes, start=1):
         img_name, mp3_name = f"scene_{i}.png", f"scene_{i}.mp3"
         duration = lengths[i - 1]
-        chunks = _caption_chunks(scene.narration)
+        chunks = _caption_chunks(scene.narration) or [""]  # seslendirme yoksa altyazısız tek kare
         total_chars = sum(len(c) for c in chunks)
         background = _cover(Image.open(workdir / img_name).convert("RGB"))
         for j, chunk in enumerate(chunks):
             frame = frames_dir / f"{i:02d}_{j:02d}.png"
             _render_frame(background, chunk, frame)
-            frame_lines.append(f"file '{frame.as_posix()}'\nduration {duration * len(chunk) / total_chars:.3f}")
+            share = len(chunk) / total_chars if total_chars else 1
+            frame_lines.append(f"file '{frame.as_posix()}'\nduration {duration * share:.3f}")
         audio_lines.append(f"file '{(workdir / mp3_name).as_posix()}'")
 
     # concat demuxer son kareyi süresiz bırakır; son kare bir kez daha yazılır
@@ -341,7 +356,7 @@ def produce(
         # Omni klipleri zaten konuşan anlatıcı; sesleri sahne mp3'lerine ayrıldı, burada sadece görüntü
         head = _concat([workdir / f"narr_{i}.mp4" for i in range(1, len(script.scenes) + 1)],
                        workdir / "narrator.mp4", audio=False)
-    elif config.NARRATOR_NAME and narrator.sadtalker_ready():
+    elif with_narrator and config.NARRATOR_NAME and narrator.sadtalker_ready():
         # Konuşan yüz (SadTalker): ses değişmediyse önceki sürümün videosu kullanılır
         audio_same = not any(r.startswith("ses") for r in report)
         if _copy_if_unchanged(prev_dir, "narrator.mp4", workdir, audio_same and not prev_omni):
@@ -367,7 +382,7 @@ def produce(
                  f"[3:v]format=gray[mask];[face][mask]alphamerge[badge];"
                  f"[bg][badge]overlay={x}:{y}[withface];[withface][4:v]overlay={x}:{y},format=yuv420p[v]",
                  "-map", "[v]", "-map", "1:a"]
-    elif config.NARRATOR_NAME:
+    elif with_narrator and config.NARRATOR_NAME:
         # Yedek: ağzı her sahnenin ses yüksekliğine göre çizilen rozet
         mp3s = [workdir / f"scene_{i}.mp3" for i in range(1, len(script.scenes) + 1)]
         inputs += ["-f", "concat", "-safe", "0", "-i", str(narrator.track(mp3s, lengths, workdir))]

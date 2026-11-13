@@ -113,29 +113,65 @@
   <a href="/gelismis">Gelişmiş (takvim, istatistik) →</a>
 </div></header>
 <main>
-{% macro video_settings() %}
-  <div class="api-key box" style="margin-top:8px">
-    <label style="margin-top:0">Gemini API anahtarı
-      <small>(<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio'dan al</a>; faturalandırma açık olmalı, ücretsiz katmanda video yok)</small></label>
-    <div class="row">
-      <input type="password" name="gemini_api_key" autocomplete="off" style="flex:1; min-width:220px"
-             placeholder="{{ 'Kayıtlı anahtar ' ~ key_hint ~ ' (değiştirmek için yaz)' if key_hint else 'AIza…' }}">
-      {% if key_hint %}<label class="row" style="margin:0; gap:6px; font-weight:500"><input type="checkbox" name="forget_key" value="1" style="width:auto; margin:0"> Anahtarı sil</label>{% endif %}
+{% macro create_form() %}
+  <form method="post" action="/create" id="create-form">
+    <input type="hidden" name="settings_form" value="1">
+    <label style="margin-top:0">1. Ne tür video?</label>
+    <div class="choices">
+      <label class="choice" style="margin:0"><span class="top"><input type="radio" name="mode" value="topic" {{ "checked" if topics else "disabled" }}> <b>Konularımdan</b></span>
+        <span class="muted">{% if topics %}Konular: {{ topics|map(attribute="title")|join(", ") }}. Claude yeni bir alt başlık seçip senaryoyu yazar.{% else %}Önce 1. adımda kanalını ve konularını kaydet.{% endif %}</span></label>
+      <label class="choice" style="margin:0"><span class="top"><input type="radio" name="mode" value="prompt" {{ "" if topics else "checked" }}> <b>Kendi tarifimden</b></span>
+        <span class="muted">Ne istediğini yaz; kanal ve konu gerekmez, Cuma Robot olmaz.</span></label>
     </div>
-    <p class="muted" style="margin:6px 0 0">Anahtar kaydedilirken doğrulanır ve sadece bu bilgisayarda saklanır.
-      Videonun tamamını (sahneler ve ses) Gemini üretir. Hata olursa "Tekrar dene"de
-      hazır klipler yeniden ücretlendirilmez.</p>
-    <p style="margin:6px 0 0"><b>API kullanımı (bu ay):</b> {{ api_usage.videos }} video, {{ "%.0f"|format(api_usage.seconds) }} sn,
-      ≈ <b>{{ "%.2f"|format(api_usage.cost) }} $</b> <span class="muted">· toplam ≈ {{ "%.2f"|format(api_usage.total_cost) }} $ (tahmini; kesin tutar Google faturasında)</span></p>
-  </div>
-  <label class="row" style="gap:8px; font-weight:500; margin-top:14px"><input type="checkbox" name="use_cuma" value="1" style="width:auto; margin:0" {{ "checked" if use_cuma }}>
-    <span>🤖 <b>Cuma Robot köşede anlatıcı olsun</b> <small>(kapalıysa ekranda karakter olmaz, görünmeyen bir ses anlatır)</small></span></label>
-  <label>Video süresi</label>
-  <div class="lengths">
-    {% for key, l in lengths.items() %}
-    <label><input type="radio" name="length" value="{{ key }}" {{ "checked" if key == current_length }}> {{ l.label }} <span class="muted">≈ {{ "%.1f"|format(l.max_seconds * price_per_second) }} $</span></label>
-    {% endfor %}
-  </div>
+    <div data-mode="prompt">
+      <label>Nasıl bir video istiyorsun?</label>
+      <textarea name="prompt" placeholder="ör. Yağmurlu bir İstanbul sokağında yürüyen kedi, gece ışıkları. Seslendirme istiyorsan onu da yaz."></textarea>
+    </div>
+
+    <label>2. Nasıl üretilsin?</label>
+    <div class="choices">
+      {% for key, q in qualities.items() %}
+      <label class="choice" style="margin:0"><span class="top"><input type="radio" name="quality" value="{{ key }}" {{ "checked" if key == current_quality }}> <b>{{ q.label }}</b></span>
+        <span class="muted">{{ q.desc }}</span></label>
+      {% endfor %}
+    </div>
+    <div class="api-key box" data-quality="omni" style="margin-top:8px">
+      <label style="margin-top:0">Gemini API anahtarı
+        <small>(<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio'dan al</a>; faturalandırma açık olmalı)</small></label>
+      <div class="row">
+        <input type="password" name="gemini_api_key" autocomplete="off" style="flex:1; min-width:220px"
+               placeholder="{{ 'Kayıtlı anahtar ' ~ key_hint ~ ' (değiştirmek için yaz)' if key_hint else 'AIza…' }}">
+        {% if key_hint %}<label class="row" style="margin:0; gap:6px; font-weight:500"><input type="checkbox" name="forget_key" value="1" style="width:auto; margin:0"> Anahtarı sil</label>{% endif %}
+      </div>
+      <p class="muted" style="margin:6px 0 0">Anahtar doğrulanır ve sadece bu bilgisayarda saklanır. Hata sonrası "Tekrar dene"de hazır klipler yeniden ücretlendirilmez.
+        <b>Bu ay:</b> {{ api_usage.videos }} video, ≈ {{ "%.2f"|format(api_usage.cost) }} $ (kesin tutar Google faturasında).</p>
+    </div>
+    <div data-quality="local">
+      <label>Seslendirme</label>
+      <div class="row">
+        <select name="voice" style="width:auto; margin:0">
+          {% for key, v in voices.items() %}<option value="{{ key }}" {{ "selected" if key == current_voice }}>{{ v.label }} · {{ v.desc }}</option>{% endfor %}
+        </select>
+        <audio id="voice-preview" controls preload="none" src="/voice-sample/{{ current_voice }}" style="height:32px"></audio>
+      </div>
+    </div>
+
+    <label>3. Ayarlar</label>
+    <label class="row" data-mode="topic" style="gap:8px; font-weight:500; margin:0 0 10px"><input type="checkbox" name="use_cuma" value="1" style="width:auto; margin:0" {{ "checked" if use_cuma }}>
+      <span>🤖 <b>Cuma Robot köşede anlatıcı olsun</b> <small>(kapalıysa ekranda karakter olmaz, görünmeyen bir ses anlatır)</small></span></label>
+    <div class="lengths">
+      {% for key, l in lengths.items() %}
+      <label><input type="radio" name="length" value="{{ key }}" {{ "checked" if key == current_length }}> {{ l.label }}
+        <span class="muted" data-quality="omni">≈ {{ "%.1f"|format(l.max_seconds * price_per_second) }} $</span></label>
+      {% endfor %}
+    </div>
+    <div class="row" style="margin-top:16px">
+      <span data-mode="topic"><select name="count" style="width:auto; margin:0"><option value="1">1 video</option><option value="2">2 video</option><option value="3">3 video</option></select></span>
+      <button>🎬 Videoyu üret</button>
+      <span class="muted" data-quality="local">Ücretsiz.</span>
+      <span class="muted" data-quality="omni">Ücretli; tahmini tutar sürenin yanında.</span>
+    </div>
+  </form>
 {% endmacro %}
 {% macro remove_button(subtopic_id, label="Kaldır", anchor="adim3") %}
   <form method="post" action="/subtopics/{{ subtopic_id }}/remove" style="margin:0"
@@ -145,7 +181,7 @@
 {% with messages = get_flashed_messages() %}{% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}{% endwith %}
 
 <nav class="steps">
-  {% for n, title in [(1, "Başla"), (2, "İsim"), (3, "Videolar"), (4, "Yayın")] %}
+  {% for n, title in [(1, "Kanal"), (2, "İsim"), (3, "Video üret"), (4, "Yayın")] %}
   <a href="#adim{{ n }}" class="{{ step[n] }}"><span class="n">{{ "✓" if step[n] == "done" else n }}</span><span class="t">{{ title }}</span></a>
   {% endfor %}
 </nav>
@@ -154,8 +190,8 @@
 <section class="step {{ step[1] }}" id="adim1">
   <div class="head"><span class="n">{{ "✓" if step[1] == "done" else 1 }}</span><div>
     <h2>Kanalını tanımla</h2>
-    <p>Kanalın adını ve hangi konularda video yapacağını yaz. "Başlat"a basınca iki iş aynı anda başlar:
-       isim sosyal medyada taranır ve ilk videoların hazırlanır.</p>
+    <p>Kanalının adını ve hangi konularda video yapacağını yaz. Kaydedince isim sosyal medyada taranır;
+       videoları 3. adımda üretirsin. Sadece tarifle video yapacaksan bu adımı atlayabilirsin.</p>
   </div></div>
   {% macro setup_form(editing) %}
   <form method="post" action="/start">
@@ -164,44 +200,21 @@
     <label>Hangi konularda video yapalım? <small>(her satıra bir konu{% if editing %}; sildiğin konunun sırada bekleyen videoları iptal edilir{% endif %})</small></label>
     <textarea name="topics" required placeholder="Robotlar&#10;Deniz canlıları&#10;İnsan vücudu">{% for t in topics %}{{ t.title }}
 {% endfor %}</textarea>
-    {{ video_settings() }}
-    <label class="row" style="gap:8px; font-weight:500"><input type="checkbox" name="produce" value="1" style="width:auto; margin:0" {{ "" if editing else "checked" }}>
-      Kaydedince videoları da hazırlamaya başla:
-      <select name="count" style="width:auto; margin:0">
-        <option value="1">1 video</option><option value="2">2 video</option><option value="3">3 video</option>
-      </select></label>
-    <p class="muted" style="margin:4px 0 0">İşaretlemezsen sadece kaydedilir; adımları gözden geçirip videoları sonra 3. adımdan başlatırsın.</p>
-    <div style="margin-top:18px"><button>{{ "Kaydet" if editing else "Başlat →" }}</button></div>
+    <div style="margin-top:18px"><button>{{ "Kaydet" if editing else "Kaydet ve devam et →" }}</button></div>
   </form>
   {% endmacro %}
   {% if step[1] == "done" %}
     <div class="summary">
       <span class="muted">Kanal adı:</span> <span class="chip">{{ brand.display or brand.desired }}</span>
       <span class="muted">Konular:</span> {% for t in topics %}<span class="chip">{{ t.title }}</span>{% endfor %}
-      <span class="muted">Süre:</span> <span class="chip">{{ lengths[current_length].label }}</span>
-      <span class="muted">Anlatıcı:</span> <span class="chip">{{ "Cuma Robot" if use_cuma else "Yok" }}</span>
     </div>
     <details class="box" id="duzenle">
-      <summary style="margin:0">✏️ Değiştir (kanal adı, konular, süre, ses)</summary>
+      <summary style="margin:0">✏️ Kanal adını veya konuları değiştir</summary>
       {{ setup_form(True) }}
     </details>
   {% else %}
     {{ setup_form(False) }}
   {% endif %}
-  <div class="box" id="prompt" style="margin-top:16px">
-    <b>✨ Ya da istediğin videoyu yaz</b>
-    <p class="muted" style="margin:4px 0 0">Kanal veya konu gerekmez, Cuma Robot olmaz. Stilini, sahnesini sen anlat; seslendirme istiyorsan onu da yaz.</p>
-    <form method="post" action="/prompt">
-      <textarea name="prompt" required placeholder="ör. Yağmurlu bir İstanbul sokağında yürüyen kedi, sinematik, gece ışıkları"></textarea>
-      <div class="row" style="margin-top:8px">
-        <select name="length" style="width:auto; margin:0">
-          {% for key, l in lengths.items() %}<option value="{{ key }}" {{ "selected" if key == current_length }}>{{ l.label }} · en fazla ≈ {{ "%.1f"|format(l.max_seconds * price_per_second) }} $</option>{% endfor %}
-        </select>
-        <button>Videoyu üret</button>
-        {% if not key_hint %}<span class="muted">Önce yukarıdan Gemini API anahtarını girmelisin.</span>{% endif %}
-      </div>
-    </form>
-  </div>
 </section>
 
 {# ---------------------------------------------------------------- 2. İSİM #}
@@ -262,12 +275,16 @@
 {# ---------------------------------------------------------------- 3. VİDEOLAR #}
 <section class="step {{ step[3] }}" id="adim3">
   <div class="head"><span class="n">{{ "✓" if step[3] == "done" else 3 }}</span><div>
-    <h2>Videoları kontrol et</h2>
-    <p>Her video hazır olunca burada belirir. İzle: beğendiysen onayla; beğenmediysen neyin değişmesini istediğini
-       yaz, sadece o kısım (metin, görsel veya ses) yeniden hazırlanır.</p>
+    <h2>Video üret ve kontrol et</h2>
+    <p>Aşağıdan yeni video üret. Hazır olan her video burada belirir: beğendiysen onayla, beğenmediysen
+       neyin değişmesini istediğini yaz; sadece o kısım yeniden hazırlanır.</p>
   </div></div>
 
-  {% if step[3] == "waiting" %}<p class="muted">Önce 1. adımı tamamla.</p>{% endif %}
+  <div class="box" id="yeni">
+    <h3 style="margin:0 0 10px">🎬 Yeni video üret</h3>
+    {{ create_form() }}
+  </div>
+  {% if in_progress or review or failed or producing %}<b style="display:block; margin-top:18px">Videoların</b>{% endif %}
 
   {% if producing and not in_progress %}
   <div class="box">
@@ -310,7 +327,8 @@
       {% if m.revision_summary %}<p class="note">Yapılan düzeltme: {{ m.revision_summary }}</p>{% endif %}
       <p style="margin:4px 0">{{ sc.description }}<br><span class="muted">{% for t in sc.hashtags %}#{{ t }} {% endfor %}</span></p>
       <p class="muted" style="margin:4px 0">
-        {% if m.engine == "omni" %}{{ "Cuma Robot anlatıyor" if m.narrator else "Anlatıcısız" }} · Gemini API · bu videonun maliyeti ≈ {{ "%.2f"|format(v.id|api_cost) }} ${% else %}Eski yerel yöntemle üretildi{% endif %}</p>
+        {{ "Cuma Robot anlatıyor" if m.narrator != false else "Anlatıcısız" }} ·
+        {% if m.engine == "omni" %}Gemini API · bu videonun maliyeti ≈ {{ "%.2f"|format(v.id|api_cost) }} ${% else %}Yerel · Ses: {{ voices.get({"female": "emel", "male": "ahmet"}.get(m.voice, m.voice), {}).get("label", m.voice or "—") }}{% endif %}</p>
       <details><summary>Seslendirme metnini göster</summary>
         <ol class="scenes">{% for x in sc.scenes %}<li>{{ x.narration }}</li>{% endfor %}</ol></details>
       <div class="row" style="margin:14px 0 0">
@@ -319,30 +337,13 @@
       </div>
       <form method="post" action="/videos/{{ v.id }}/revise" style="margin-top:14px">
         <label style="margin-top:0">👎 Beğenmedin mi? Neyi değiştirelim?</label>
-        <textarea name="feedback" placeholder="ör. 'giriş sıkıcı', '3. sahnede ahtapot yok', '2. sahnede robotun sesi bozuk'"></textarea>
+        <textarea name="feedback" placeholder="{{ "ör. 'giriş sıkıcı', '3. sahnede ahtapot yok', '2. sahnede robotun sesi bozuk'" if m.engine == "omni" else "ör. 'giriş sıkıcı', '3. görselde ahtapot yok', 'Ahmet sesi olsun', 'biraz daha hızlı'" }}"></textarea>
         <button class="bad" style="margin-top:8px">Düzelt</button>
       </form>
     </div>
   </div>
   {% endfor %}
 
-  {% if step[3] != "waiting" and not in_progress and not review %}
-    <p class="muted">{{ "Onay bekleyen video yok." if ready else "Henüz video yok." }}</p>
-  {% endif %}
-  {% if step[3] != "waiting" %}
-  <details class="box">
-    <summary style="margin:0">⚙️ Süre ve Gemini ayarları ({{ lengths[current_length].label }}){% if api_usage.cost %} · API bu ay ≈ {{ "%.2f"|format(api_usage.cost) }} ${% endif %}</summary>
-    <form method="post" action="/settings">
-      {{ video_settings() }}
-      <div style="margin-top:12px"><button class="small">Kaydet</button> <span class="muted">Yeni videolarda geçerli olur.</span></div>
-    </form>
-  </details>
-  <form method="post" action="/more" class="row" style="margin-top:14px">
-    <span class="muted">Yeni video hazırla:</span>
-    <select name="count" style="width:auto"><option value="1">1 video</option><option value="2">2 video</option><option value="3">3 video</option></select>
-    <button class="ghost small" {% if producing %}title="Mevcut işler bitince başlar"{% endif %}>Hazırla</button>
-  </form>
-  {% endif %}
 </section>
 
 {# ---------------------------------------------------------------- 4. YAYIN #}
@@ -432,6 +433,20 @@
 </main>
 
 <script>
+  // Üretim formu: seçilen türe ve yönteme göre ilgili alanları göster
+  function syncCreate() {
+    const f = document.getElementById("create-form");
+    if (!f) return;
+    const mode = f.elements.mode.value, quality = f.elements.quality.value;
+    f.querySelectorAll("[data-mode]").forEach(e => e.style.display = e.dataset.mode === mode ? "" : "none");
+    f.querySelectorAll("[data-quality]").forEach(e => e.style.display = e.dataset.quality === quality ? "" : "none");
+    f.elements.prompt.required = mode === "prompt";
+  }
+  document.addEventListener("change", e => {
+    if (e.target.form && e.target.form.id === "create-form") syncCreate();
+    if (e.target.name === "voice") document.getElementById("voice-preview").src = "/voice-sample/" + e.target.value;
+  });
+  syncCreate();
   // Arka plandaki işler ilerledikçe sayfayı yenile; yazı yazarken veya video izlerken bekle.
   let sig = "{{ signature }}";
   function userBusy() {

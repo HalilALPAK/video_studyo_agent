@@ -8,7 +8,7 @@ import json
 import logging
 
 from . import config, db, omni, voices
-from .agents import analyst, gemini_video, planner, publisher, scriptwriter
+from .agents import analyst, gemini_video, planner, producer, publisher, scriptwriter
 
 log = logging.getLogger(__name__)
 
@@ -30,23 +30,27 @@ def produce_subtopic(subtopic_id: int) -> int:
     row = db.one("SELECT status, mode, angle FROM subtopics WHERE id = ?", (subtopic_id,))
     if row is None or row["status"] == "deleted":
         return 0  # sırada beklerken panelden kaldırıldı ya da konusu değişti
-    omni.require_key()
-    db.execute("UPDATE subtopics SET status = 'producing', error = '' WHERE id = ?", (subtopic_id,))
-    progress = lambda text: db.set_progress(subtopic_id, text)  # noqa: E731
-    workdir = config.VIDEO_DIR / str(subtopic_id) / "v1"
     from_prompt = row["mode"] == "prompt"
     # Yarım kalan denemenin senaryosu ve ayarları korunur: aynı metinle üretilen ücretli klipler tekrar ödenmez
     failed = db.one("SELECT id, script, meta FROM videos WHERE subtopic_id = ? AND status = 'failed' AND version = 1 "
                     "ORDER BY id DESC", (subtopic_id,))
+    old = json.loads(failed["meta"] or "{}") if failed else {}
+    engine = old.get("engine", "local") if failed else voices.current_quality()
+    if engine == "omni":
+        omni.require_key()
+    db.execute("UPDATE subtopics SET status = 'producing', error = '' WHERE id = ?", (subtopic_id,))
+    progress = lambda text: db.set_progress(subtopic_id, text)  # noqa: E731
+    workdir = config.VIDEO_DIR / str(subtopic_id) / "v1"
     try:
         if failed and failed["script"]:
             script = scriptwriter.Script.model_validate_json(failed["script"])
             video_id = failed["id"]
-            old = json.loads(failed["meta"] or "{}")
-            meta = {"engine": "omni", "narrator": old.get("narrator", True), "cartoon": old.get("cartoon", True)}
+            meta = {"engine": engine, "narrator": old.get("narrator", True), "cartoon": old.get("cartoon", True),
+                    "voice": old.get("voice", voices.current_voice()), "rate": old.get("rate", "normal")}
             db.execute("UPDATE videos SET status = 'producing' WHERE id = ?", (video_id,))
         else:
-            meta = {"engine": "omni", "narrator": not from_prompt and voices.use_cuma(), "cartoon": not from_prompt}
+            meta = {"engine": engine, "narrator": not from_prompt and voices.use_cuma(), "cartoon": not from_prompt,
+                    "voice": voices.current_voice(), "rate": "normal"}
             progress("Senaryo yazılıyor")
             script = (scriptwriter.write_from_prompt(row["angle"]) if from_prompt
                       else scriptwriter.write(subtopic_id, narrator=meta["narrator"]))
@@ -54,8 +58,12 @@ def produce_subtopic(subtopic_id: int) -> int:
                 "INSERT INTO videos(subtopic_id, version, script, meta, workdir) VALUES(?, 1, ?, ?, ?)",
                 (subtopic_id, script.model_dump_json(), json.dumps(meta), str(workdir)),
             )
-        path = gemini_video.produce(script, workdir, on_progress=progress, usage_ref=video_id,
-                                    narrator=meta["narrator"], cartoon=meta["cartoon"])
+        if engine == "omni":
+            path = gemini_video.produce(script, workdir, on_progress=progress, usage_ref=video_id,
+                                        narrator=meta["narrator"], cartoon=meta["cartoon"])
+        else:
+            path = producer.produce(script, workdir, voice=meta["voice"], rate=meta["rate"], on_progress=progress,
+                                    max_seconds=voices.current_length()["max_seconds"], with_narrator=meta["narrator"])
     except Exception as e:
         log.exception("Alt başlık %s üretilemedi", subtopic_id)
         db.execute("UPDATE subtopics SET status = 'failed', error = ?, progress = '' WHERE id = ?", (str(e), subtopic_id))
@@ -83,8 +91,9 @@ def add_prompt_video(text: str) -> int:
 
 
 def kickoff(count: int) -> str:
-    """Başla adımı: `count` alt başlık planlar ve hepsini hemen üretir (tarihlerini beklemeden)."""
-    omni.require_key()
+    """`count` alt başlık planlar ve hepsini hemen üretir (tarihlerini beklemeden)."""
+    if voices.current_quality() == "omni":
+        omni.require_key()
     created = planner.plan(count)
     if not created:
         raise RuntimeError("Konulardan yeni alt başlık çıkarılamadı (hepsi daha önce işlenmiş olabilir). "

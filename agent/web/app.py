@@ -24,7 +24,7 @@ STATUS_TR = {
     "published": "Yayınlandı", "publish_failed": "Bazı hesaplara yüklenemedi", "failed": "Hata",
     "rejected": "Reddedildi", "ok": "Yüklendi", "pending": "Bekliyor", "deleted": "Kaldırıldı",
 }
-STAGES = ["Senaryo", "Gemini video", "Altyazı", "Birleştirme"]
+STAGES = ["Senaryo", "Görüntü", "Ses ve altyazı", "Birleştirme"]
 
 
 @app.template_filter("script")
@@ -47,7 +47,8 @@ def _tr(status: str) -> str:
     return STATUS_TR.get(status, status)
 
 
-STAGE_KEYS = [("birleştir", 4), ("altyazı", 3), ("gemini", 2), ("senaryo", 1), ("notun", 1)]
+STAGE_KEYS = [("birleştir", 4), ("altyazı", 3), ("seslendirme", 3), ("konuşturuluyor", 3), ("sığdırılıyor", 3),
+              ("gemini", 2), ("görsel", 2), ("senaryo", 1), ("notun", 1)]
 
 
 def _stage(progress: str) -> int:
@@ -129,12 +130,11 @@ def index():
     accounts = publisher.accounts()
     started = bool(brand_state["desired"] and topics)
     waiting_publish = any(v["status"] != "published" for v in ready)
-    has_videos = bool(in_progress or review or failed or ready or jobs.busy("main"))  # prompt videosu kanal kurmadan da olur
     # Her adım: "done" (tamam), "active" (şimdi senin/sistemin sırası) veya "waiting" (henüz değil)
     step = {
         1: "done" if started else "active",
         2: "waiting" if not started else "done" if brand_state["chosen"] else "active",
-        3: "waiting" if not (started or has_videos) else "active" if (in_progress or review or failed or not ready) else "done",
+        3: "active" if (in_progress or review or failed or not ready) else "done",  # tarifle video kanal kurmadan da üretilir
         4: "waiting" if not ready else "active" if waiting_publish else "done",
     }
 
@@ -162,6 +162,10 @@ def index():
         current_length=db.get_setting("video_length", voices.DEFAULT_LENGTH),
         price_per_second=omni.TOKENS_PER_SECOND * omni.PRICE_OUTPUT,
         use_cuma=voices.use_cuma(),
+        qualities=voices.QUALITIES,
+        current_quality=voices.current_quality(),
+        voices=voices.VOICES,
+        current_voice=voices.current_voice(),
         key_hint=(k := omni.api_key()) and f"…{k[-4:]}",
         api_usage=omni.usage_summary(),
         signature=_signature(),
@@ -169,10 +173,12 @@ def index():
 
 
 def _save_settings(form) -> str | None:
-    """Süre ve Gemini anahtarını kaydeder. Sorun varsa kullanıcıya gösterilecek mesajı döndürür."""
+    """Üretim formundaki seçimleri kaydeder. Sorun varsa kullanıcıya gösterilecek mesajı döndürür."""
     if form.get("length") in voices.LENGTHS:
         db.set_setting("video_length", form["length"])
-    db.set_setting("use_cuma", "1" if form.get("use_cuma") else "0")  # kutu her iki formda da var
+    if form.get("voice") in voices.VOICES:
+        db.set_setting("voice", form["voice"])
+    db.set_setting("use_cuma", "1" if form.get("use_cuma") else "0")
     if form.get("forget_key"):
         db.set_setting("gemini_api_key", "")
     key = form.get("gemini_api_key", "").strip()
@@ -182,14 +188,20 @@ def _save_settings(form) -> str | None:
         except omni.OmniError as e:
             return str(e)
         db.set_setting("gemini_api_key", key)
+    if form.get("quality") in voices.QUALITIES:
+        if form["quality"] == "omni" and not omni.api_key():
+            return "Gemini ile üretmek için API anahtarını girmelisin (ya da ücretsiz Yerel yöntemi seç)."
+        db.set_setting("quality", form["quality"])
     return None
 
 
-@app.post("/settings")
-def settings():
-    error = _save_settings(request.form)
-    flash(error or "Ayarlar kaydedildi; bundan sonraki videolarda kullanılacak.")
-    return _back("adim3")
+@app.get("/voice-sample/<voice_id>")
+def voice_sample(voice_id: str):
+    from ..agents import producer
+
+    if voice_id not in voices.VOICES:
+        abort(404)
+    return send_file(producer.voice_sample(voice_id), mimetype="audio/mpeg")
 
 
 @app.get("/api/signature")
@@ -219,14 +231,13 @@ def _set_topics(titles: list[str]) -> list[str]:
 
 @app.post("/start")
 def start():
-    """1. adım: ilk kurulum ve sonradan "Değiştir" ile düzenleme aynı formu kullanır."""
+    """1. adım: kanal adı ve konular (ilk kayıt ve "Değiştir" aynı form). Video üretmez."""
     name = request.form.get("name", "").strip()
     topics = [t.strip() for t in request.form.get("topics", "").splitlines() if t.strip()]
-    count = max(1, min(int(request.form.get("count") or 1), 5))
     if not name or not topics:
         flash("Kanal adını ve en az bir konuyu yazmalısın.")
         return _back("adim1")
-    messages = [error] if (error := _save_settings(request.form)) else []
+    messages = []
     if name != db.get_setting("brand_desired"):
         db.set_setting("brand_desired", name)
         db.set_setting("brand_name", name)  # isim seçilene kadar senaryolarda bu kullanılır
@@ -236,15 +247,9 @@ def start():
     removed = _set_topics(topics)
     if removed:
         messages.append(f"Çıkarılan konular ({', '.join(removed)}) için sırada bekleyen videolar iptal edildi.")
-    if request.form.get("produce") and not omni.api_key():
-        messages.append("Video üretimi başlamadı: önce Gemini API anahtarını gir.")
-    elif request.form.get("produce"):
-        jobs.submit(f"{count} video", orchestrator.kickoff, count, lane="main")
-        messages.append(f"{count} video hazırlanmaya başladı.")
-    else:
-        messages.append("Kaydedildi. Videoları hazır olduğunda 3. adımdan başlatabilirsin.")
+    messages.append("Kanal kaydedildi. Videoları 3. adımdaki \"Yeni video üret\" bölümünden üretebilirsin.")
     flash(" ".join(messages))
-    return _back("adim2" if not db.get_setting("brand_handle") else "adim3")
+    return _back("adim2" if not db.get_setting("brand_handle") else "yeni")
 
 
 # --- 2. İsim ------------------------------------------------------------------------
@@ -333,39 +338,32 @@ def remove_subtopic(subtopic_id: int):
     return _back(request.form.get("anchor", "adim3"))
 
 
-@app.post("/prompt")
-def prompt_video():
-    text = request.form.get("prompt", "").strip()
-    if not text:
-        flash("Nasıl bir video istediğini yazmalısın.")
-        return _back("prompt")
-    if request.form.get("length") in voices.LENGTHS:
-        db.set_setting("video_length", request.form["length"])
-    if not omni.api_key():
-        flash("Önce Gemini API anahtarını gir.")
-        return _back("prompt")
-    subtopic_id = orchestrator.add_prompt_video(text)
-    jobs.submit("Prompt videosu", orchestrator.produce_subtopic, subtopic_id, lane="main")
-    flash("Videon hazırlanıyor; hazır olunca 3. adımda görünecek.")
-    return _back("adim3")
-
-
-@app.post("/more")
-def more():
-    if not omni.api_key():
-        flash("Önce 1. adımdaki Değiştir bölümünden Gemini API anahtarını gir.")
-        return _back("adim1")
-    count = max(1, min(int(request.form.get("count") or 1), 5))
-    jobs.submit(f"{count} yeni video", orchestrator.kickoff, count, lane="main")
-    flash(f"{count} yeni video hazırlanıyor.")
+@app.post("/create")
+def create():
+    """3. adımdaki tek üretim formu: konulardan ya da serbest tariften, yerel ya da Gemini ile."""
+    if error := _save_settings(request.form):
+        flash(error)
+        return _back("yeni")
+    if request.form.get("mode") == "prompt":
+        text = request.form.get("prompt", "").strip()
+        if not text:
+            flash("Nasıl bir video istediğini yazmalısın.")
+            return _back("yeni")
+        subtopic_id = orchestrator.add_prompt_video(text)
+        jobs.submit("Tariften video", orchestrator.produce_subtopic, subtopic_id, lane="main")
+        flash("Videon hazırlanıyor; aşağıda ilerlemesini görebilirsin.")
+    else:
+        if not db.one("SELECT 1 FROM topics WHERE active = 1"):
+            flash("Konulardan video için önce 1. adımda kanalını ve konularını kaydet.")
+            return _back("adim1")
+        count = max(1, min(int(request.form.get("count") or 1), 5))
+        jobs.submit(f"{count} video", orchestrator.kickoff, count, lane="main")
+        flash(f"{count} video hazırlanıyor; aşağıda ilerlemesini görebilirsin.")
     return _back("adim3")
 
 
 @app.post("/subtopics/<int:subtopic_id>/produce")
 def produce(subtopic_id: int):
-    if not omni.api_key():
-        flash("Önce 1. adımdaki Değiştir bölümünden Gemini API anahtarını gir.")
-        return _back("adim1")
     db.set_progress(subtopic_id, "Sırada")
     db.execute("UPDATE subtopics SET status = 'planned', error = '' WHERE id = ?", (subtopic_id,))
     jobs.submit(f"Üretim: alt başlık {subtopic_id}", orchestrator.produce_subtopic, subtopic_id, lane="main")

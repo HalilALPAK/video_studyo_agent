@@ -37,10 +37,10 @@ LENGTHS = {
 }
 DEFAULT_LENGTH = "medium"
 
-# Anlatıcı kalitesi: yerel (seçilen ses + SadTalker, ücretsiz) veya Gemini Omni (ücretli, Omni kendi sesiyle konuşur)
+# Üretim yöntemi: yerel (Claude çizer, seçilen ses okur; ücretsiz) veya Gemini Omni (gerçek video, ücretli)
 QUALITIES = {
-    "local": {"label": "Yerel · orta kalite", "desc": "Ücretsiz, bilgisayarında çalışır. Seçtiğin ses + SadTalker konuşan yüz (1 dk video ≈ 10 dk)."},
-    "omni": {"label": "Gemini API · yüksek kalite", "desc": "Google Gemini Omni Flash: Cuma'yı gerçekçi canlandırır ve kendi sesiyle konuşturur. Hızlı ama ücretli (≈0,10 $/sn, 35 sn video ≈ 3,5 $)."},
+    "local": {"label": "Yerel · ücretsiz", "desc": "Sahneleri bilgisayarındaki Claude çizer, seçtiğin ses okur. API anahtarı gerekmez."},
+    "omni": {"label": "Gemini API · yüksek kalite", "desc": "Google Gemini gerçek hareketli video ve ses üretir. Ücretli, API anahtarı gerekir."},
 }
 DEFAULT_QUALITY = "local"
 
