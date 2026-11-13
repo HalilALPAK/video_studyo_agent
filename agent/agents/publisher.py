@@ -50,20 +50,38 @@ def connected_platforms() -> list[str]:
     return [a["platform"] for a in accounts() if a["connected"]]
 
 
-def login(platform: str, signup: bool = False, fill: dict | None = None) -> str:
-    """Kalıcı "Video Stüdyosu" Chrome profilinde giriş (signup=True ise kayıt) sayfasını açar;
-    kullanıcı giriş yapınca oturum otomatik algılanıp kaydedilir. fill (email, password, name,
-    username) verilirse formlar bununla doldurulur; stdin ile geçer, diske yazılmaz."""
-    cmd = [
-        str(config.BROWSER_PYTHON), str(CONNECT_HELPER),
-        "--platform", platform, "--out", str(account_file(platform)),
+def _helper(platform: str, *extra: str) -> list[str]:
+    return [
+        str(config.BROWSER_PYTHON), str(CONNECT_HELPER), "--platform", platform,
         "--profile", str(config.CHROME_PROFILE_DIR), "--port", str(config.CHROME_CDP_PORT),
-        "--chrome", config.CHROME_PATH,
+        "--chrome", config.CHROME_PATH, *extra,
     ]
+
+
+def inspect(platform: str) -> str:
+    """Bağlı hesabın sayfasını (YouTube Studio, TikTok Studio, Instagram) Video Stüdyosu Chrome'unda açar."""
+    proc = subprocess.run(_helper(platform, "--inspect"), cwd=config.ROOT, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=120)
+    label = PLATFORM_LABELS.get(platform, platform)
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout).strip().splitlines()
+        raise RuntimeError(f"{label} açılamadı: {err[-1] if err else 'bilinmeyen hata'}")
+    return f"{label} hesabı Video Stüdyosu Chrome penceresinde açıldı."
+
+
+def login(platform: str, signup: bool = False, fill: dict | None = None, switch: bool = False) -> str:
+    """Kalıcı "Video Stüdyosu" Chrome profilinde giriş (signup=True ise kayıt) sayfasını açar;
+    kullanıcı giriş yapınca oturum otomatik algılanıp kaydedilir ve sekme hesabın sayfasında açık kalır.
+    switch=True önce bu platformdaki hesaptan çıkış yapar. fill (email, password, name, username)
+    verilirse formlar bununla doldurulur; stdin ile geçer, diske yazılmaz."""
+    cmd = _helper(platform, "--out", str(account_file(platform)))
     if signup:
         cmd.append("--signup")
     if fill:
         cmd.append("--fill")
+    if switch:
+        cmd.append("--switch")
+        account_file(platform).unlink(missing_ok=True)  # yeni hesap girilene kadar bağlı görünmesin
     label = PLATFORM_LABELS.get(platform, platform)
     proc = subprocess.run(cmd, cwd=config.ROOT, input=json.dumps(fill or {}), capture_output=True,
                           text=True, encoding="utf-8", errors="replace", timeout=960)

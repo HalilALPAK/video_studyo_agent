@@ -7,6 +7,7 @@ import datetime as dt
 import hashlib
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, url_for
@@ -399,8 +400,22 @@ def account_login(platform: str):
         handle = db.get_setting("brand_handle") or brand.normalize(db.get_setting("brand_desired") or "")
         fill = {**_credentials, "name": db.get_setting("brand_name") or handle, "username": handle}
     label = publisher.PLATFORM_LABELS.get(platform, platform)
-    jobs.submit(f"{label} {'kaydı' if signup else 'girişi'}", publisher.login, platform, signup, fill, lane="login")
-    flash(f"Video Stüdyosu Chrome penceresinde {label} {'kayıt' if signup else 'giriş'} sayfası açılıyor.")
+    switch = request.form.get("mode") == "switch"
+    action = "hesap değişikliği" if switch else "kaydı" if signup else "girişi"
+    jobs.submit(f"{label} {action}", publisher.login, platform, signup, fill, switch, lane="login")
+    flash(f"{label}: mevcut hesaptan çıkış yapıldı, Video Stüdyosu Chrome penceresinde yeni hesabınla giriş yap."
+          if switch else f"Video Stüdyosu Chrome penceresinde {label} {'kayıt' if signup else 'giriş'} sayfası açılıyor.")
+    return _back("adim4")
+
+
+@app.post("/accounts/<platform>/inspect")
+def account_inspect(platform: str):
+    if platform not in config.PLATFORMS:
+        abort(404)
+    try:
+        flash(publisher.inspect(platform))
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+        flash(str(e))
     return _back("adim4")
 
 

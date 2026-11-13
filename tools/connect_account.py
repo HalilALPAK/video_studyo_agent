@@ -15,6 +15,7 @@ tarihi ve "Gönder" kullanıcıdadır. Bilgiler diske yazılmaz.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -100,25 +101,46 @@ def ensure_chrome(chrome: str, profile: Path, port: int, url: str) -> bool:
     raise RuntimeError("Chrome açılamadı.")
 
 
+# Bağlı hesabı incelemek için açılan sayfa (giriş sonrası da sekme burada açık kalır)
+INSPECT = {
+    "youtube": "https://studio.youtube.com/",
+    "instagram": "https://www.instagram.com/",
+    "tiktok": "https://www.tiktok.com/tiktokstudio/content",
+}
+
+
 def _matches(domain: str, allowed: list[str]) -> bool:
     domain = domain.lstrip(".")
     return any(domain == a or domain.endswith("." + a) for a in allowed)
 
 
+def _open(page, url: str) -> None:
+    try:  # bazı siteler (TikTok) "load" olayını çok geç tetikler; sayfa zaten açılıyor
+        page.goto(url, wait_until="commit", timeout=60_000)
+    except PlaywrightError:
+        pass
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--platform", required=True, choices=list(LOGINS))
-    parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--out", type=Path, help="oturum dosyası (--inspect dışında gerekli)")
     parser.add_argument("--profile", required=True, type=Path)
     parser.add_argument("--port", type=int, default=9333)
     parser.add_argument("--chrome", required=True)
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--signup", action="store_true", help="giriş yerine kayıt sayfasını aç")
     parser.add_argument("--fill", action="store_true", help="stdin'deki JSON ile form alanlarını doldur")
+    parser.add_argument("--inspect", action="store_true", help="sadece bağlı hesabın sayfasını aç")
+    parser.add_argument("--switch", action="store_true", help="bu platformdan çıkış yap, başka hesapla girişi bekle")
     args = parser.parse_args()
+    if not args.inspect and not args.out:
+        parser.error("--out gerekli")
 
     url, (cookie_domain, cookie_name), keep = LOGINS[args.platform]
-    if args.signup:
+    if args.inspect:
+        url = INSPECT[args.platform]
+    elif args.signup:
         url = SIGNUPS[args.platform]
     fill = json.loads(sys.stdin.read() or "{}") if args.fill else {}
     if fill.get("name") and not fill.get("first"):
@@ -129,15 +151,19 @@ def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{args.port}")
         context = browser.contexts[0]
-        if launched:
+        if args.switch:
+            # Mevcut hesaptan çıkış: bu platformun (YouTube'da Google'ın da) çerezleri profilden silinir
+            pattern = re.compile(r"(^|\.)(" + "|".join(re.escape(d) for d in keep) + r")$")
+            context.clear_cookies(domain=pattern)
+        if launched and not args.switch:
             page = next((pg for pg in context.pages if pg.url.startswith("http")), None) or context.pages[0]
         else:
             page = context.new_page()
-            try:  # bazı siteler (TikTok) "load" olayını çok geç tetikler; sayfa zaten açılıyor
-                page.goto(url, wait_until="commit", timeout=60_000)
-            except PlaywrightError:
-                pass
+            _open(page, url)
         page.bring_to_front()
+        if args.inspect:
+            print(f"Açıldı: {url}")
+            return 0
 
         def logged_in() -> bool:
             return any(c["name"] == cookie_name and _matches(c["domain"], [cookie_domain]) for c in context.cookies())
@@ -172,10 +198,7 @@ def main() -> int:
         state["origins"] = [o for o in state["origins"] if _matches(o["origin"].split("://")[-1], keep)]
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-        try:
-            page.close()  # pencere açık kalır; sadece bu sekme kapanır
-        except Exception:
-            pass
+        _open(page, INSPECT[args.platform])  # sekme kapanmaz: bağlanan hesap incelenebilsin
     print(f"Bağlandı: {args.platform} -> {args.out}")
     return 0
 

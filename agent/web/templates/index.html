@@ -376,14 +376,23 @@
     <div class="account">
       <b>{{ a.label }}</b>
       {% if a.connected %}<span class="badge b-ok">✓ Bağlı</span>{% else %}<span class="badge b-mute">Bağlı değil</span>{% endif %}
+      {% if a.connected %}
+      <div class="row" style="margin:0; gap:6px">
+        <form method="post" action="/accounts/{{ a.platform }}/inspect" style="margin:0">
+          <button class="small" title="Hesabın sayfasını Video Stüdyosu Chrome'unda açar">🔍 Hesabı incele</button></form>
+        <form method="post" action="/accounts/{{ a.platform }}/login" style="margin:0">
+          <button class="small ghost" {% if login_busy %}disabled{% endif %} title="Oturumu yeniler; sekme açık kalır">🔄 Yeniden bağlan</button></form>
+        <form method="post" action="/accounts/{{ a.platform }}/login" style="margin:0"
+              onsubmit="return confirm('{{ a.label }} hesabından çıkış yapılacak ve başka bir hesapla girmen beklenecek.{{ ' YouTube için bu pencerede Google hesabından da çıkılır.' if a.platform == 'youtube' else '' }} Devam edilsin mi?')">
+          <input type="hidden" name="mode" value="switch">
+          <button class="small ghost" {% if login_busy %}disabled{% endif %}>🔁 Hesap değiştir</button></form>
+      </div>
+      {% else %}
       <form method="post" action="/accounts/{{ a.platform }}/login" class="row" style="margin:0; gap:6px">
-        {% if a.connected %}
-        <button class="small ghost" {% if login_busy %}disabled{% endif %}>Yeniden bağlan</button>
-        {% else %}
         <button class="small" {% if login_busy %}disabled{% endif %}>Giriş yap</button>
         <button class="small ghost" name="mode" value="signup" {% if login_busy %}disabled{% endif %}>Hesap aç</button>
-        {% endif %}
       </form>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
